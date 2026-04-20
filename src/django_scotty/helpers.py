@@ -547,6 +547,6 @@ def load_scotty_urls(app_name=None):
                 logging.error(
                     f"[SCOTTY LOADER] Error importando {full_module_path} {err}"
                 )
-            collected_urls = add_urls(modules_list)
+            collected_urls += add_urls(modules_list)
 
     return collected_urls
