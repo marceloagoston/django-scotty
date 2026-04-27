@@ -63,11 +63,56 @@
 </br>
     <div class="row justify-content-right">
         <div class="col-12 text-end">
-            <a href="{% url table.create_url %}" class="btn btn-primary">
+            {% if table.usar_modal %}
+            <button class="btn btn-primary"
+                    data-bs-toggle="modal"
+                    data-bs-target="#modal-{{ table.unique_id }}">
                 Nuevo <i class="bi bi-plus"></i>
-            </a>
+            </button>
+            {% else %}
+            <button class="btn btn-primary"
+                    hx-get="{% url table.create_url %}"
+                    hx-target="#main-content"
+                    hx-swap="innerHTML"
+                    hx-push-url="true">
+                Nuevo <i class="bi bi-plus"></i>
+            </button>
+            {% endif %}
         </div>
     </div>
+
+    {% if table.usar_modal %}
+    <div id="modal-{{ table.unique_id }}"
+         class="modal fade"
+         tabindex="-1"
+         aria-hidden="true"
+         hx-get="{% url table.create_url %}?_mid={{ table.unique_id }}"
+         hx-trigger="show.bs.modal"
+         hx-target="#modal-{{ table.unique_id }}-body"
+         hx-swap="innerHTML">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div id="modal-{{ table.unique_id }}-body" class="modal-body">
+                    {% comment %} Modal content
+                    Aca renderizar el llamado hx
+                    {% endcomment %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+{% endif %}
+
+{% if table.deleteview_class %}
+<div id="modal-delete-{{ table.unique_id }}"
+     class="modal fade" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div id="modal-delete-{{ table.unique_id }}-body" class="modal-body">
+            </div>
+        </div>
+    </div>
+</div>
 {% endif %}
 
 <script>

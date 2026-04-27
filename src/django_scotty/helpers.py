@@ -12,11 +12,11 @@ from urllib.parse import parse_qs
 from crispy_forms.helper import FormHelper
 from django.core.paginator import EmptyPage, Paginator
 from django.db.models import QuerySet
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import redirect
 from django.urls import path, reverse
 from django.utils.safestring import SafeText
-from django.views.generic import DetailView
+from django.views.generic import CreateView, DeleteView, DetailView, UpdateView
 from django_filters.views import FilterView
 from django_tables2.export.views import ExportMixin
 from django_tables2.views import SingleTableMixin, SingleTableView
@@ -40,8 +40,50 @@ class ActionTable(tables.Table):
         Si es una sola en forma de botón, si es más de una
         como botones agrupados."""
 
+        rendered_edit = SafeText("")
+        if getattr(self, "updateview_class", None) is not None:
+            try:
+                edit_url = reverse(self.update_url_name, kwargs={"pk": record.pk})
+                if getattr(self, "usar_modal", False):
+                    modal_id = f"modal-{self.unique_id}"
+                    rendered_edit = SafeText(
+                        f'<button class="btn btn-warning btn-sm"'
+                        f' hx-get="{edit_url}?_mid={self.unique_id}"'
+                        f' hx-target="#{modal_id}-body"'
+                        f' hx-swap="innerHTML"'
+                        f' data-bs-toggle="modal"'
+                        f' data-bs-target="#{modal_id}">Editar</button>'
+                    )
+                else:
+                    rendered_edit = SafeText(
+                        f'<button class="btn btn-warning btn-sm"'
+                        f' hx-get="{edit_url}"'
+                        f' hx-target="#main-content"'
+                        f' hx-swap="innerHTML"'
+                        f' hx-push-url="true">Editar</button>'
+                    )
+            except Exception:
+                pass
+
+        rendered_delete = SafeText("")
+        if getattr(self, "deleteview_class", None) is not None:
+            try:
+                delete_url = reverse(self.delete_url_name, kwargs={"pk": record.pk})
+                delete_mid = f"delete-{self.unique_id}"
+                modal_id = f"modal-{delete_mid}"
+                rendered_delete = SafeText(
+                    f'<button class="btn btn-danger btn-sm ms-1"'
+                    f' hx-get="{delete_url}?_mid={delete_mid}"'
+                    f' hx-target="#{modal_id}-body"'
+                    f' hx-swap="innerHTML"'
+                    f' data-bs-toggle="modal"'
+                    f' data-bs-target="#{modal_id}">Eliminar</button>'
+                )
+            except Exception:
+                pass
+
         if getattr(self, "url_action_method", None) is None:
-            return ""
+            return rendered_edit + rendered_delete
 
         rendered_actions = SafeText("")
         url = reverse(self.url_action_method)
@@ -53,9 +95,9 @@ class ActionTable(tables.Table):
             try:
                 condition_result = accion_method.condition(record, self.request)
                 if not condition_result:
-                    return ""
+                    return rendered_edit + rendered_delete
             except Exception:
-                return ""
+                return rendered_edit + rendered_delete
 
             show_confirm = getattr(accion_method, "show_confirm", False)
             confirm_attr = (
@@ -70,7 +112,7 @@ class ActionTable(tables.Table):
                     hx-indicator=\"#spinner-load\"
                     type=\"btn\"
                     {confirm_attr}>{accion[1]}</button>"""
-            return SafeText(button_html)
+            return rendered_edit + rendered_delete + SafeText(button_html)
         elif len(self.action_columns) > 1:
             rendered_actions = SafeText("")
             for accion in self.action_columns:
@@ -99,7 +141,7 @@ class ActionTable(tables.Table):
                     </li>"""
                 rendered_actions += SafeText(action_html)
 
-            return SafeText(f"""
+            return rendered_edit + rendered_delete + SafeText(f"""
                             <div class="btn-group">
                             <button type="button"
                             class="btn btn-primary dropdown-toggle"
@@ -111,7 +153,7 @@ class ActionTable(tables.Table):
                             </ul>
                             </div>""")
         else:
-            return ""
+            return rendered_edit + rendered_delete
 
 
 # TODO: Test
@@ -158,7 +200,12 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
     paginate_by = 10
     available_action_names = None
     show_boton_nuevo = False
+    usar_modal = False
     create_url = None
+    createview_class = None
+    updateview_class = None
+    deleteview_class = None
+
     title = "Listado"
     # Control para mostrar/ocultar "Acción sobre seleccionados"
     show_bulk_actions = True
@@ -224,7 +271,26 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         orig_table.title = self.title
         orig_table.view_only = view_only
         orig_table.show_boton_nuevo = self.show_boton_nuevo
-        orig_table.create_url = self.create_url
+        orig_table.usar_modal = self.usar_modal
+
+        if self.createview_class is not None:
+            orig_table.create_url = f"create-view-{self.createview_class.get_slugname()}"
+        else:
+            orig_table.create_url = self.create_url or f"create-view-{self.get_slugname()}"
+
+        orig_table.updateview_class = self.updateview_class
+        orig_table.update_url_name = (
+            f"update-view-{self.updateview_class.get_slugname()}"
+            if self.updateview_class is not None
+            else None
+        )
+
+        orig_table.deleteview_class = self.deleteview_class
+        orig_table.delete_url_name = (
+            f"delete-view-{self.deleteview_class.get_slugname()}"
+            if self.deleteview_class is not None
+            else None
+        )
         context["table"] = orig_table
 
         # Agregar control para mostrar/ocultar acciones masivas
@@ -351,6 +417,7 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         trimed_view_name = cls.__name__.lower().removesuffix("view")
         return trimed_view_name
 
+    # TASK: ver si no conviene ya tener un metodo que retorne el url_name
 
 def generar_id_valido(base_id):
     """
@@ -453,6 +520,217 @@ class GenericDetailView(DetailView):
         return trimed_view_name
 
 
+class GenericCreateView(CreateView):
+    """
+    CreateView genérica con soporte HTMX para modal o navegación full-page.
+    Se registra automáticamente en las URLs via add_urls() / load_scotty_urls().
+
+    Atributos obligatorios:
+        model       (Model)     Modelo Django asociado al formulario.
+        form_class  (ModelForm) Formulario a renderizar.
+
+    Atributos opcionales:
+        partial_template_name (str) Template del fragmento de formulario que se
+                                    carga dentro del modal o en #main-content via
+                                    HTMX. Default: "django_tables2/generic_form_item.html".
+        title_form          (str)   Título que se muestra dentro del formulario.
+                                    Default: None (no muestra título).
+
+    URL generada automáticamente:
+        {slugname}/crear/  →  name="create-view-{slugname}"
+
+    El slugname se deriva del nombre de la clase removiendo el sufijo "CreateView".
+    Ejemplo: ArticuloCreateView → slugname="articulo" → URL: articulo/crear/
+    """
+
+    template_name = "django_tables2/generic_form.html"
+    partial_template_name = "django_tables2/generic_form_item.html"
+    title_form = None
+
+    def get_template_names(self):
+        if self.request.htmx:
+            return [self.partial_template_name]
+        return super().get_template_names()
+
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        if not hasattr(form, "helper"):
+            return form
+        mid = self.request.GET.get("_mid") or self.request.POST.get("_mid")
+        form_id = get_unique_id("form-")
+        if mid:
+            form.helper.attrs = {
+                "id": form_id,
+                "hx-post": f"{self.request.path}?_mid={mid}",
+                "hx-target": f"#modal-{mid}-body",
+                "hx-swap": "innerHTML",
+            }
+        else:
+            form.helper.attrs = {"id": form_id}
+            form.helper.form_action = self.request.path
+            
+        return form
+
+    def _get_model(self):
+        if self.model:
+            return self.model
+        return getattr(getattr(self.form_class, "_meta", None), "model", None)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        model = self._get_model()
+        verbose_name = model._meta.verbose_name.capitalize() if model else ""
+        context["title"] = f"Crear {verbose_name}"
+        context["partial_template_name"] = self.partial_template_name
+        context["title_form"] = self.title_form
+        return context
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        if self.request.htmx:
+            htmx_response = HttpResponse()
+            htmx_response["HX-Refresh"] = "true"
+            return htmx_response
+        return response
+
+    def get_success_url(self):
+        # TODO: esto tendria que ser generico y venir de la clase?
+        return reverse(f"list-view-{self.get_slugname()}")
+
+    @classmethod
+    def get_slugname(cls):
+        """Devolver un slugname para la URL de la vista."""
+        return cls.__name__.lower().removesuffix("createview")
+
+
+class GenericUpdateView(UpdateView):
+    """
+    UpdateView genérica con soporte HTMX para modal o navegación full-page.
+    Se registra automáticamente en las URLs via add_urls() / load_scotty_urls().
+    Se activa en la tabla asociada asignando updateview_class en el
+    CottonTableView correspondiente.
+
+    Atributos obligatorios:
+        model       (Model)     Modelo Django asociado al formulario.
+        form_class  (ModelForm) Formulario a renderizar.
+
+    Atributos opcionales:
+        partial_template_name (str) Template del fragmento de formulario que se
+                                    carga dentro del modal o en #main-content via
+                                    HTMX. Default: "django_tables2/generic_form_item.html".
+        title_form          (str)   Título que se muestra dentro del formulario.
+                                    Default: None (no muestra título).
+
+    URL generada automáticamente:
+        {slugname}/<pk>/editar/  →  name="update-view-{slugname}"
+
+    El slugname se deriva del nombre de la clase removiendo el sufijo "UpdateView".
+    Ejemplo: ArticuloUpdateView → slugname="articulo" → URL: articulo/<pk>/editar/
+    """
+
+    template_name = "django_tables2/generic_form.html"
+    partial_template_name = "django_tables2/generic_form_item.html"
+    title_form = None
+
+    def get_template_names(self):
+        if self.request.htmx:
+            return [self.partial_template_name]
+        return super().get_template_names()
+
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        if not hasattr(form, "helper"):
+            return form
+        mid = self.request.GET.get("_mid") or self.request.POST.get("_mid")
+        form_id = get_unique_id("form-")
+        if mid:
+            form.helper.attrs = {
+                "id": form_id,
+                "hx-post": f"{self.request.path}?_mid={mid}",
+                "hx-target": f"#modal-{mid}-body",
+                "hx-swap": "innerHTML",
+            }
+        else:
+            form.helper.attrs = {"id": form_id}
+            form.helper.form_action = self.request.path
+        return form
+
+    def _get_model(self):
+        if self.model:
+            return self.model
+        return getattr(getattr(self.form_class, "_meta", None), "model", None)
+
+    def get_queryset(self):
+        if self.model is None and self.queryset is None:
+            model = self._get_model()
+            if model:
+                return model._default_manager.all()
+        return super().get_queryset()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        model = self._get_model()
+        verbose_name = model._meta.verbose_name.capitalize() if model else ""
+        context["title"] = f"Editar {verbose_name}"
+        context["partial_template_name"] = self.partial_template_name
+        context["title_form"] = self.title_form
+        return context
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        if self.request.htmx:
+            htmx_response = HttpResponse()
+            htmx_response["HX-Refresh"] = "true"
+            return htmx_response
+        return response
+
+    def get_success_url(self):
+        return reverse(f"list-view-{self.get_slugname()}")
+
+    @classmethod
+    def get_slugname(cls):
+        """Devolver un slugname para la URL de la vista."""
+        return cls.__name__.lower().removesuffix("updateview")
+
+
+class GenericDeleteView(DeleteView):
+    """
+    DeleteView genérica que siempre se renderiza dentro de un modal Bootstrap.
+    Muestra confirmación con el __str__ del objeto antes de eliminar.
+
+    Se registra automáticamente en las URLs via add_urls() / load_scotty_urls().
+
+    URL generada automáticamente:
+        {slugname}/<pk>/eliminar/  →  name="delete-view-{slugname}"
+
+    El slugname se deriva del nombre de la clase removiendo el sufijo "DeleteView".
+    Ejemplo: ArticuloDeleteView → slugname="articulo"
+    """
+
+    template_name = "django_tables2/generic_delete_confirm.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["mid"] = self.request.GET.get("_mid") or self.request.POST.get("_mid")
+        return context
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        if self.request.htmx:
+            htmx_response = HttpResponse()
+            htmx_response["HX-Refresh"] = "true"
+            return htmx_response
+        return response
+
+    def get_success_url(self):
+        return reverse(f"list-view-{self.get_slugname()}")
+
+    @classmethod
+    def get_slugname(cls):
+        """Devolver un slugname para la URL de la vista."""
+        return cls.__name__.lower().removesuffix("deleteview")
+
+
 class DictTableView(ExportMixin, SingleTableView):
     template_name = "django_tables2/base_django_tables2_dict.html"
     show_export_xls = False
@@ -496,14 +774,39 @@ def add_urls(views_modules: List) -> List:
                     )
                 )
             if issubclass(cls, GenericDetailView):
-                # Agregar el detalle de un objeto
-                # rig
                 trimed_view_name = cls.get_slugname()
                 urlpatterns.append(
                     path(
                         f"{trimed_view_name}/<int:pk>/",
                         cls.as_view(model=cls.model),
                         name=f"detail-view-{trimed_view_name}",
+                    )
+                )
+            if name != "GenericCreateView" and issubclass(cls, GenericCreateView):
+                trimed_view_name = cls.get_slugname()
+                urlpatterns.append(
+                    path(
+                        f"{trimed_view_name}/crear/",
+                        cls.as_view(),
+                        name=f"create-view-{trimed_view_name}",
+                    )
+                )
+            if name != "GenericUpdateView" and issubclass(cls, GenericUpdateView):
+                trimed_view_name = cls.get_slugname()
+                urlpatterns.append(
+                    path(
+                        f"{trimed_view_name}/<int:pk>/editar/",
+                        cls.as_view(),
+                        name=f"update-view-{trimed_view_name}",
+                    )
+                )
+            if name != "GenericDeleteView" and issubclass(cls, GenericDeleteView):
+                trimed_view_name = cls.get_slugname()
+                urlpatterns.append(
+                    path(
+                        f"{trimed_view_name}/<int:pk>/eliminar/",
+                        cls.as_view(),
+                        name=f"delete-view-{trimed_view_name}",
                     )
                 )
     return urlpatterns
