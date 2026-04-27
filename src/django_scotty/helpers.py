@@ -520,112 +520,21 @@ class GenericDetailView(DetailView):
         return trimed_view_name
 
 
-class GenericCreateView(CreateView):
+class HtmxFormMixin:
     """
-    CreateView genérica con soporte HTMX para modal o navegación full-page.
-    Se registra automáticamente en las URLs via add_urls() / load_scotty_urls().
-
-    Atributos obligatorios:
-        model       (Model)     Modelo Django asociado al formulario.
-        form_class  (ModelForm) Formulario a renderizar.
+    Mixin compartido por GenericCreateView y GenericUpdateView.
 
     Atributos opcionales:
-        partial_template_name (str) Template del fragmento de formulario que se
-                                    carga dentro del modal o en #main-content via
-                                    HTMX. Default: "django_tables2/generic_form_item.html".
-        title_form          (str)   Título que se muestra dentro del formulario.
-                                    Default: None (no muestra título).
+        partial_template_name (str) Template del fragmento cargado vía HTMX.
+                                    Default: "django_tables2/generic_form_item.html".
+        title_form            (str) Título dentro del formulario. Default: None.
 
-    URL generada automáticamente:
-        {slugname}/crear/  →  name="create-view-{slugname}"
-
-    El slugname se deriva del nombre de la clase removiendo el sufijo "CreateView".
-    Ejemplo: ArticuloCreateView → slugname="articulo" → URL: articulo/crear/
-    """
-
-    template_name = "django_tables2/generic_form.html"
-    partial_template_name = "django_tables2/generic_form_item.html"
-    title_form = None
-
-    def get_template_names(self):
-        if self.request.htmx:
-            return [self.partial_template_name]
-        return super().get_template_names()
-
-    def get_form(self, form_class=None):
-        form = super().get_form(form_class)
-        if not hasattr(form, "helper"):
-            return form
-        mid = self.request.GET.get("_mid") or self.request.POST.get("_mid")
-        form_id = get_unique_id("form-")
-        if mid:
-            form.helper.attrs = {
-                "id": form_id,
-                "hx-post": f"{self.request.path}?_mid={mid}",
-                "hx-target": f"#modal-{mid}-body",
-                "hx-swap": "innerHTML",
-            }
-        else:
-            form.helper.attrs = {"id": form_id}
-            form.helper.form_action = self.request.path
-            
-        return form
-
-    def _get_model(self):
-        if self.model:
-            return self.model
-        return getattr(getattr(self.form_class, "_meta", None), "model", None)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        model = self._get_model()
-        verbose_name = model._meta.verbose_name.capitalize() if model else ""
-        context["title"] = f"Crear {verbose_name}"
-        context["partial_template_name"] = self.partial_template_name
-        context["title_form"] = self.title_form
-        return context
-
-    def form_valid(self, form):
-        response = super().form_valid(form)
-        if self.request.htmx:
-            htmx_response = HttpResponse()
-            htmx_response["HX-Refresh"] = "true"
-            return htmx_response
-        return response
-
-    def get_success_url(self):
-        # TODO: esto tendria que ser generico y venir de la clase?
-        return reverse(f"list-view-{self.get_slugname()}")
-
-    @classmethod
-    def get_slugname(cls):
-        """Devolver un slugname para la URL de la vista."""
-        return cls.__name__.lower().removesuffix("createview")
-
-
-class GenericUpdateView(UpdateView):
-    """
-    UpdateView genérica con soporte HTMX para modal o navegación full-page.
-    Se registra automáticamente en las URLs via add_urls() / load_scotty_urls().
-    Se activa en la tabla asociada asignando updateview_class en el
-    CottonTableView correspondiente.
-
-    Atributos obligatorios:
-        model       (Model)     Modelo Django asociado al formulario.
-        form_class  (ModelForm) Formulario a renderizar.
-
-    Atributos opcionales:
-        partial_template_name (str) Template del fragmento de formulario que se
-                                    carga dentro del modal o en #main-content via
-                                    HTMX. Default: "django_tables2/generic_form_item.html".
-        title_form          (str)   Título que se muestra dentro del formulario.
-                                    Default: None (no muestra título).
-
-    URL generada automáticamente:
-        {slugname}/<pk>/editar/  →  name="update-view-{slugname}"
-
-    El slugname se deriva del nombre de la clase removiendo el sufijo "UpdateView".
-    Ejemplo: ArticuloUpdateView → slugname="articulo" → URL: articulo/<pk>/editar/
+    Comportamiento automático:
+        - Renderiza partial_template_name en requests HTMX, template_name completo en el resto.
+        - Si el form tiene FormHelper, inyecta los atributos hx-post/hx-target para modal
+          (cuando llega ?_mid=) o form_action para navegación full-page.
+        - model puede omitirse si form_class define Meta.model.
+        - Tras guardar: HX-Refresh en requests HTMX, redirect a list-view-{slugname} en el resto.
     """
 
     template_name = "django_tables2/generic_form.html"
@@ -667,15 +576,6 @@ class GenericUpdateView(UpdateView):
                 return model._default_manager.all()
         return super().get_queryset()
 
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        model = self._get_model()
-        verbose_name = model._meta.verbose_name.capitalize() if model else ""
-        context["title"] = f"Editar {verbose_name}"
-        context["partial_template_name"] = self.partial_template_name
-        context["title_form"] = self.title_form
-        return context
-
     def form_valid(self, form):
         response = super().form_valid(form)
         if self.request.htmx:
@@ -684,12 +584,47 @@ class GenericUpdateView(UpdateView):
             return htmx_response
         return response
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["partial_template_name"] = self.partial_template_name
+        context["title_form"] = self.title_form
+        return context
+
     def get_success_url(self):
         return reverse(f"list-view-{self.get_slugname()}")
 
+
+class GenericCreateView(HtmxFormMixin, CreateView):
+    """
+    Atributos obligatorios:
+        form_class  (ModelForm) Debe definir Meta.model (model se deriva automáticamente).
+
+    URL generada automáticamente:
+        {slugname}/crear/  →  name="create-view-{slugname}"
+
+    Slugname: nombre de clase sin sufijo "CreateView" en minúsculas.
+    Ejemplo: ArticuloCreateView → "articulo"
+    """
+
     @classmethod
     def get_slugname(cls):
-        """Devolver un slugname para la URL de la vista."""
+        return cls.__name__.lower().removesuffix("createview")
+
+
+class GenericUpdateView(HtmxFormMixin, UpdateView):
+    """
+    Atributos obligatorios:
+        form_class  (ModelForm) Debe definir Meta.model (model y queryset se derivan automáticamente).
+
+    URL generada automáticamente:
+        {slugname}/<pk>/editar/  →  name="update-view-{slugname}"
+
+    Slugname: nombre de clase sin sufijo "UpdateView" en minúsculas.
+    Ejemplo: ArticuloUpdateView → "articulo"
+    """
+
+    @classmethod
+    def get_slugname(cls):
         return cls.__name__.lower().removesuffix("updateview")
 
 
