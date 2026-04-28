@@ -1,0 +1,4 @@
+{% extends request.htmx|yesno:"django_scotty/dummy.html,django_scotty/base.html" %}
+{% block scotty_content %}
+  {% include "django_tables2/generic_form_item.html" %}
+{% endblock scotty_content %}

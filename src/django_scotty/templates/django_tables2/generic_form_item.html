@@ -1,0 +1,17 @@
+{% comment %}
+Args:
+    - title_form (Opcional) [str]: titulo del formulario
+    - form_id (Opcional) [str]: Indica el ID del contenedor del formulario
+    - form [form]: El formulario a renderizar
+{% endcomment %}
+
+{% load crispy_forms_tags %}
+
+{% if title_form %}
+    <h4 class="h3 text-primary">{{title_form}}</h4>
+    <hr>
+{% endif %}
+<div id="{{form_id|default:"main-form"}}" class="form-group">
+    {% csrf_token %}
+    {% crispy form %}
+</div>
