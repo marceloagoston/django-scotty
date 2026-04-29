@@ -10,6 +10,8 @@ from typing import List
 from urllib.parse import parse_qs
 
 from crispy_forms.helper import FormHelper
+from django_scotty.form_helpers import CloseButton, get_form_buttons
+from crispy_forms.layout import HTML, Div, Submit
 from django.core.paginator import EmptyPage, Paginator
 from django.db.models import QuerySet
 from django.http import Http404, HttpResponse
@@ -525,10 +527,16 @@ class HtmxFormMixin:
     Mixin compartido por GenericCreateView y GenericUpdateView.
 
     Atributos opcionales:
-        partial_template_name (str) Template del fragmento cargado vía HTMX.
-                                    Default: "django_tables2/generic_form_item.html".
-        title_form            (str) Título dentro del formulario. Default: None.
+        partial_template_name (str)  Template del fragmento cargado vía HTMX.
+                                     Default: "django_tables2/generic_form_item.html".
+        title_form            (str)  Título dentro del formulario. Default: None.
+        auto_forms_buttons    (bool) Genera botones "Submit" (Guardar) y Cerrar/Volver
+                                     automaticamente según se haya pedido que los forms
+                                     se rendericen en modal o no
 
+                                     Hace append de los botones al final del layout del
+                                     Form que se le haya pasado a las GenericViews 
+                                     Default: True
     Comportamiento automático:
         - Renderiza partial_template_name en requests HTMX, template_name completo en el resto.
         - Si el form tiene FormHelper, inyecta los atributos hx-post/hx-target para modal
@@ -540,6 +548,7 @@ class HtmxFormMixin:
     template_name = "django_tables2/generic_form.html"
     partial_template_name = "django_tables2/generic_form_item.html"
     title_form = None
+    auto_forms_buttons = True
 
     def get_template_names(self):
         if self.request.htmx:
@@ -562,6 +571,16 @@ class HtmxFormMixin:
         else:
             form.helper.attrs = {"id": form_id}
             form.helper.form_action = self.request.path
+
+        if self.auto_forms_buttons and getattr(form.helper, "layout", None) is not None:
+            form.helper._usar_modal = bool(mid)
+            if not mid and not getattr(form.helper, "back_url", None):
+                try:
+                    form.helper.back_url = reverse(f"list-view-{self.get_slugname()}")
+                except Exception:
+                    pass
+            form.helper.layout.fields.append(get_form_buttons())
+
         return form
 
     def _get_model(self):
