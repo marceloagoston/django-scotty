@@ -527,10 +527,16 @@ class HtmxFormMixin:
     Mixin compartido por GenericCreateView y GenericUpdateView.
 
     Atributos opcionales:
-        partial_template_name (str) Template del fragmento cargado vía HTMX.
-                                    Default: "django_tables2/generic_form_item.html".
-        title_form            (str) Título dentro del formulario. Default: None.
+        partial_template_name (str)  Template del fragmento cargado vía HTMX.
+                                     Default: "django_tables2/generic_form_item.html".
+        title_form            (str)  Título dentro del formulario. Default: None.
+        auto_forms_buttons    (bool) Genera botones "Submit" (Guardar) y Cerrar/Volver
+                                     automaticamente según se haya pedido que los forms
+                                     se rendericen en modal o no
 
+                                     Hace append de los botones al final del layout del
+                                     Form que se le haya pasado a las GenericViews 
+                                     Default: True
     Comportamiento automático:
         - Renderiza partial_template_name en requests HTMX, template_name completo en el resto.
         - Si el form tiene FormHelper, inyecta los atributos hx-post/hx-target para modal
