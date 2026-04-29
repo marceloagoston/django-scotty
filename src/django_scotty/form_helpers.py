@@ -2,6 +2,7 @@ from crispy_forms.layout import HTML, Div, Submit
 
 
 class CloseButton(HTML):
+    """Renderizar boton Volver/Cerrar segun se use modal o no"""
     def render(self, form, context, **kwargs):
         usar_modal = getattr(form.helper, '_usar_modal', False)
         if usar_modal:
