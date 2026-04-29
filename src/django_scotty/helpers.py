@@ -10,6 +10,8 @@ from typing import List
 from urllib.parse import parse_qs
 
 from crispy_forms.helper import FormHelper
+from django_scotty.form_helpers import CloseButton, get_form_buttons
+from crispy_forms.layout import HTML, Div, Submit
 from django.core.paginator import EmptyPage, Paginator
 from django.db.models import QuerySet
 from django.http import Http404, HttpResponse
@@ -540,6 +542,7 @@ class HtmxFormMixin:
     template_name = "django_tables2/generic_form.html"
     partial_template_name = "django_tables2/generic_form_item.html"
     title_form = None
+    auto_forms_buttons = True
 
     def get_template_names(self):
         if self.request.htmx:
@@ -562,6 +565,16 @@ class HtmxFormMixin:
         else:
             form.helper.attrs = {"id": form_id}
             form.helper.form_action = self.request.path
+
+        if self.auto_forms_buttons and getattr(form.helper, "layout", None) is not None:
+            form.helper._usar_modal = bool(mid)
+            if not mid and not getattr(form.helper, "back_url", None):
+                try:
+                    form.helper.back_url = reverse(f"list-view-{self.get_slugname()}")
+                except Exception:
+                    pass
+            form.helper.layout.fields.append(get_form_buttons())
+
         return form
 
     def _get_model(self):
