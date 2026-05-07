@@ -10,8 +10,7 @@ from typing import List
 from urllib.parse import parse_qs
 
 from crispy_forms.helper import FormHelper
-from django_scotty.form_helpers import CloseButton, get_form_buttons
-from crispy_forms.layout import HTML, Div, Submit
+from django_scotty.form_helpers import get_form_buttons
 from django.core.paginator import EmptyPage, Paginator
 from django.db.models import QuerySet
 from django.http import Http404, HttpResponse
@@ -28,6 +27,7 @@ import django_tables2 as tables
 class ActionTable(tables.Table):
     def __init__(self, *args, **kwargs):
         self.action_columns = kwargs.pop("available_actions", [])
+        self.post_paginate_hook = kwargs.pop("post_paginate_hook", None)
         super().__init__(*args, **kwargs)
 
     acciones = tables.Column(verbose_name="Acciones", orderable=False, empty_values=())
@@ -64,8 +64,8 @@ class ActionTable(tables.Table):
                         f' hx-swap="innerHTML"'
                         f' hx-push-url="true">Editar</button>'
                     )
-            except Exception:
-                pass
+            except Exception as err:
+                logging.error(f"[SCOTTY LOADER] Error mostrando el botón editar {err}")
 
         rendered_delete = SafeText("")
         if getattr(self, "deleteview_class", None) is not None:
@@ -143,7 +143,10 @@ class ActionTable(tables.Table):
                     </li>"""
                 rendered_actions += SafeText(action_html)
 
-            return rendered_edit + rendered_delete + SafeText(f"""
+            return (
+                rendered_edit
+                + rendered_delete
+                + SafeText(f"""
                             <div class="btn-group">
                             <button type="button"
                             class="btn btn-primary dropdown-toggle"
@@ -154,8 +157,18 @@ class ActionTable(tables.Table):
                                 {rendered_actions}
                             </ul>
                             </div>""")
+            )
         else:
             return rendered_edit + rendered_delete
+
+    def paginate(self, *args, **kwargs):
+        # Llamamos al método original primero
+        super().paginate(*args, **kwargs)
+
+        # Ahora que la paginación ocurrió, 'self.page' existe
+        if self.page and self.post_paginate_hook:
+            ids_mostrados = [obj.record.pk for obj in self.page.object_list]
+            self.post_paginate_hook(ids_mostrados)
 
 
 # TODO: Test
@@ -207,7 +220,8 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
     createview_class = None
     updateview_class = None
     deleteview_class = None
-
+    post_paginate_hook = None
+    pre_render_hook = None
     title = "Listado"
     # Control para mostrar/ocultar "Acción sobre seleccionados"
     show_bulk_actions = True
@@ -229,6 +243,8 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         else:
             available_actions = list(self.available_actions)
             kwargs["available_actions"] = available_actions
+
+        kwargs["post_paginate_hook"] = self.post_paginate_hook
 
         return kwargs
 
@@ -276,9 +292,13 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         orig_table.usar_modal = self.usar_modal
 
         if self.createview_class is not None:
-            orig_table.create_url = f"create-view-{self.createview_class.get_slugname()}"
+            orig_table.create_url = (
+                f"create-view-{self.createview_class.get_slugname()}"
+            )
         else:
-            orig_table.create_url = self.create_url or f"create-view-{self.get_slugname()}"
+            orig_table.create_url = (
+                self.create_url or f"create-view-{self.get_slugname()}"
+            )
 
         orig_table.updateview_class = self.updateview_class
         orig_table.update_url_name = (
@@ -318,6 +338,10 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         if "filtrar" in action_buttons and "limpiar" not in action_buttons:
             action_buttons = list(action_buttons) + ["limpiar"]
             context["show_action_buttons"] = action_buttons
+
+        # Si hay definido hook de pre_render
+        if self.pre_render_hook:
+            self.pre_render_hook(orig_table, context)
 
         return context
 
@@ -420,6 +444,7 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         return trimed_view_name
 
     # TASK: ver si no conviene ya tener un metodo que retorne el url_name
+
 
 def generar_id_valido(base_id):
     """
@@ -535,7 +560,7 @@ class HtmxFormMixin:
                                      se rendericen en modal o no
 
                                      Hace append de los botones al final del layout del
-                                     Form que se le haya pasado a las GenericViews 
+                                     Form que se le haya pasado a las GenericViews
                                      Default: True
     Comportamiento automático:
         - Renderiza partial_template_name en requests HTMX, template_name completo en el resto.
