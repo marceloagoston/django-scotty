@@ -167,8 +167,7 @@ class ActionTable(tables.Table):
 
         # Ahora que la paginación ocurrió, 'self.page' existe
         if self.page and self.post_paginate_hook:
-            ids_mostrados = [obj.record.pk for obj in self.page.object_list]
-            self.post_paginate_hook(ids_mostrados)
+            self.post_paginate_hook(self.page.object_list)
 
 
 # TODO: Test
@@ -250,8 +249,13 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
 
     def get_table(self, **kwargs):
         # Sobreescribe get_table para pasar la instancia de la vista
+        # "
         table = super().get_table(**kwargs)
         table.view = self  # Pasa la instancia de la vista a la tabla
+
+        # Si hay definido hook de pre_render
+        if self.pre_render_hook:
+            self.pre_render_hook(table)
         return table
 
     def get_filterset(self, filterset_class):
@@ -270,9 +274,6 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         # Primero, obtenemos el contexto base de la clase padre
         context = super().get_context_data(**kwargs)
 
-        # Luego, añadimos el total de registros sin filtrar
-        # `ControlIngresoEgreso.objects.all()` nos da el QuerySet completo
-        #
         orig_table = context["table"]
         orig_table.unfiltered_records = self.model.objects.all().count()
         # TODO: Test view only
@@ -338,10 +339,6 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         if "filtrar" in action_buttons and "limpiar" not in action_buttons:
             action_buttons = list(action_buttons) + ["limpiar"]
             context["show_action_buttons"] = action_buttons
-
-        # Si hay definido hook de pre_render
-        if self.pre_render_hook:
-            self.pre_render_hook(orig_table, context)
 
         return context
 
