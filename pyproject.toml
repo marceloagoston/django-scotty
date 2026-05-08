@@ -1,6 +1,6 @@
 [project]
 name = "django-scotty"
-version = "0.1.8"
+version = "0.1.9"
 description = "Advanced tables for django cruds"
 readme = "README.md"
 authors = [
