@@ -16,7 +16,7 @@ from django.core.paginator import EmptyPage, Paginator
 from django.db.models import QuerySet
 from django.http import Http404, HttpResponse
 from django.shortcuts import redirect
-from django.urls import path, reverse
+from django.urls import path, reverse, NoReverseMatch
 from django.utils.safestring import SafeText
 from django.views.generic import CreateView, DeleteView, DetailView, UpdateView
 from django_filters.views import FilterView
@@ -36,10 +36,12 @@ def get_scotty_setting(key, default=None):
     return config.get(key, default)
 
 
-# ── Button variant classes ──────────────────────────────────────────────
+# Button variant classes
+# Esto es util si se usa una libreria distinta a Bootstrap para cambiar las clases que manejan
+# los estilos de los botones
 # Each variant can define ``outline`` and ``solid`` styles.
 # Projects can override via ``SCOTTY_CONFIG``::
-#
+# 
 #     SCOTTY_CONFIG = {
 #         "buttons_variants": {
 #             "primary":   {"outline": "btn-outline-primary",   "solid": "btn-primary"},
@@ -50,40 +52,40 @@ def get_scotty_setting(key, default=None):
 #     }
 #
 # For backward compatibility, a plain string is also accepted:
-#     "primary": "btn-outline-primary"
+#     "primary": "btn-primary"
 
-_BUTTON_VARIANT_DEFAULTS = {
+BUTTON_VARIANT_DEFAULTS = {
     "primary":   {"outline": "btn-outline-primary",   "solid": "btn-primary"},
     "secondary": {"outline": "btn-outline-secondary", "solid": "btn-secondary"},
     "danger":    {"outline": "btn-outline-danger",    "solid": "btn-danger"},
 }
 
 
-def get_button_class(variant="primary", style="outline"):
+def get_button_class(variant="primary", style="solid"):
     """Resolve a button variant + style to a CSS class.
 
     Looks up ``variant`` in ``SCOTTY_CONFIG["buttons_variants"]``.
-    Falls back to ``_BUTTON_VARIANT_DEFAULTS``, then to ``"btn-outline-primary"``.
+    Falls back to ``BUTTON_VARIANT_DEFAULTS``, then to ``"btn-primary"``.
 
     Parameters
     ----------
     variant : str
         One of ``"primary"``, ``"secondary"``, ``"danger"`` (default ``"primary"``).
     style : str
-        ``"outline"`` (default) or ``"solid"``. Ignored when the variant
+        ``"solid"`` (default) or ``"outline"``. Ignored when the variant
         value is a plain string (backward-compat).
 
     Returns
     -------
     str
-        Full Bootstrap button class, e.g. ``"btn-outline-primary"`` or ``"btn-primary"``.
+        Full Bootstrap button class, e.g. ``"btn-primary"`` or ``"btn-outline-primary"``.
     """
-    variants = get_scotty_setting("buttons_variants", _BUTTON_VARIANT_DEFAULTS)
-    entry = variants.get(variant, _BUTTON_VARIANT_DEFAULTS.get(variant, "btn-outline-primary"))
+    variants = get_scotty_setting("buttons_variants", BUTTON_VARIANT_DEFAULTS)
+    entry = variants.get(variant, BUTTON_VARIANT_DEFAULTS.get(variant, "btn-primary"))
 
     if isinstance(entry, str):
-        return entry
-    return entry.get(style, "btn-outline-primary")
+        return entry  # backward-compat: flat string
+    return entry.get(style, "btn-primary")
 
 
 class ActionTable(tables.Table):
@@ -296,20 +298,87 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
 
     # Extra header buttons rendered on the right side of the page title.
     #
+    # ``url`` debe ser un **nombre de URL de Django** (ej: ``"contrato-detail"``).
+    # Siempre se resuelve con ``reverse()``. NO pongas paths fijos.
+    #
     # Each entry is a dict with:
     #   name     (str)  – used to look up a ``{name}_method(self, request)``
-    #                     hook for extra query params. Optional.
-    #   url      (str)  – link target. Required.
+    #                     hook for extra params (path + query). Optional.
+    #   url      (str)  – Django URL name. Required. Resolved with
+    #                     ``reverse()`` on every render.
     #   label    (str)  – visible text. Required.
     #   order    (int)  – higher values appear further right. Optional.
     #   variant  (str)  – colour key: "primary", "secondary", "danger".
     #                     Defaults to "primary". Maps to a CSS class via
     #                     ``SCOTTY_CONFIG["buttons_variants"]``. Optional.
-    #   style    (str)  – "outline" (default) or "solid". Controls whether
-    #                     the button uses the outline or filled variant of
+    #   style    (str)  – "solid" (default) or "outline". Controls whether
+    #                     the button uses the filled or outline variant of
     #                     the chosen colour. Optional.
     #
     # Items missing url or label are skipped.
+    #
+    # {name}_method(self, request)
+    # If the entry has a ``name`` and the view defines
+    # ``{name}_method(self, request)``, it is called before rendering.
+    # The method returns a ``dict``. ``self`` is the view instance (so you
+    # can access anything on the view) and ``request`` is ``self.request``.
+    #
+    #   • Si el dict contiene ``pk`` o ``id`` → se pasa a ``reverse()``
+    #     como ``kwargs``, insertando el valor en el path de la URL.
+    #
+    #   • El resto de las claves → se agregan como query params.
+    #
+    # EJEMPLO 1 pasar queryparams
+    #
+    #     # urls.py → path("exportar/", …, name="exportar-list")
+    #
+    #     class PedidoListView(CottonTableView):
+    #         extra_links_actions = [
+    #           {
+    #               "name": "exportar",
+    #               "url": "exportar-list",
+    #               "label": "Exportar"
+    #           },
+    #         ]
+    #
+    #         def exportar_method(self, request):
+    #             return {"formato": "xlsx", "desde": request.GET.get("fecha", "")}
+    #
+    #     # → <a href="/exportar/?formato=xlsx&desde=2024-01-01">
+    #
+    # EJEMPLO 2 con pk/id sola (ideal para DetailViews)
+    #
+    #     # urls.py → path("contrato/<int:pk>/", …, name="contrato-detail")
+    #
+    #     class PedidoListView(CottonTableView):
+    #         extra_links_actions = [
+    #             {
+    #               "name": "contrato",
+    #               "url": "contrato-detail",
+    #               "label": "Ver contrato"
+    #             },
+    #         ]
+    #
+    #         def contrato_method(self, request):
+    #             pk = self.kwargs.get("pk")
+    #             if pk:
+    #                 return {"pk": pk}
+    #             return {}
+    #
+    #     # → <a href="/contrato/5/">  (desde /proveedor/5/pedidos/)
+    #
+    #  EJEMPLO 3 pk + queryparams
+    #
+    #         def contrato_method(self, request):
+    #             pk = self.kwargs.get("pk")
+    #             if pk:
+    #                 return {"pk": pk, "anio": request.GET.get("anio")}
+    #             return {}
+    #
+    #     # → <a href="/contrato/5/?anio=2026">
+    #
+    # Nota: si ``reverse()`` falla (NoReverseMatch) se conserva el valor
+    # original de ``url``. Si el método entero falla se silencia.
     extra_links_actions = []
 
     def get_table_kwargs(self):
@@ -354,13 +423,19 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
     def _get_processed_links(self):
         """Procesa links para mostrarse en sección 'extra_links_actions'
 
+        ``entry["url"]`` debe ser un nombre de URL de Django (ej: ``"contrato-detail"``).
+        Siempre se resuelve con :func:`reverse`.
+
         Para cada item del listado:
         1. Se saltea si no tiene ``url`` o ``label``.
         2. Si tiene ``name`` y existe ``{name}_method(self, request)``
-           en la vista, se invoca para obtener query params extra.
-        3. Se resuelve ``variant`` + ``style`` a una clase CSS de Bootstrap
+           en la vista, se invoca para obtener un dict de parámetros.
+        3. Si el dict contiene ``pk`` o ``id`` se pasa como ``kwargs`` a
+           ``reverse(url, kwargs={"pk": valor})``; si no, se llama sin kwargs.
+        4. El resto de las claves del dict se agregan como query params.
+        5. Se resuelve ``variant`` + ``style`` a una clase CSS de Bootstrap
            usando :func:`get_button_class` y se agrega como ``btn_class``.
-        4. Se ordena inversamente por ``order`` (mayor valor → más a la derecha).
+        6. Se ordena inversamente por ``order`` (mayor valor → más a la derecha).
 
         Returns:
             list[dict]: links enriquecidos con ``btn_class``, listos para
@@ -371,20 +446,39 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         for link in self.extra_links_actions:
             if not link.get("url") or not link.get("label"):
                 continue
+
             entry = dict(link)
+            reverse_kwargs = {}
+
+            # 1. Obtener parámetros del método (si existe)
             name = link.get("name", "")
             method = getattr(self, f"{name}_method", None) if name else None
+            extra_params = {}
             if callable(method):
                 try:
-                    extra_params = method(self.request)
-                    if extra_params:
-                        separator = "&" if "?" in entry["url"] else "?"
-                        entry["url"] = f"{entry['url']}{separator}{urlencode(extra_params)}"
+                    extra_params = method(self.request) or {}
                 except Exception:
-                    pass
+                    extra_params = {}
 
+            # 2. Extraer pk/id para pasarlo como path param
+            pk_value = extra_params.pop("pk", extra_params.pop("id", None))
+            if pk_value is not None:
+                reverse_kwargs["pk"] = pk_value
+
+            # 3. Resolver URL (siempre con reverse)
+            try:
+                entry["url"] = reverse(entry["url"], kwargs=reverse_kwargs or None)
+            except NoReverseMatch:
+                # conserva la url original
+                pass
+
+            # 4. Query params restantes
+            if extra_params:
+                entry["url"] += "?" + urlencode(extra_params)
+
+            # 5. Clases Bootstrap
             variant = entry.get("variant", "primary")
-            style = entry.get("style", "outline")
+            style = entry.get("style", "solid")
             entry["btn_class"] = get_button_class(variant, style)
             processed_links.append(entry)
 
@@ -394,7 +488,6 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
 
     def get_context_data(self, **kwargs):
         """Agregamos el total de registros sin filtrar al contexto."""
-        # Primero, obtenemos el contexto base de la clase padre
         context = super().get_context_data(**kwargs)
 
         orig_table = context["table"]
