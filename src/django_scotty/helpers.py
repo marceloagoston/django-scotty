@@ -302,18 +302,21 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
     # Siempre se resuelve con ``reverse()``. NO pongas paths fijos.
     #
     # Each entry is a dict with:
-    #   name     (str)  – used to look up a ``{name}_method(self, request)``
-    #                     hook for extra params (path + query). Optional.
-    #   url      (str)  – Django URL name. Required. Resolved with
-    #                     ``reverse()`` on every render.
-    #   label    (str)  – visible text. Required.
-    #   order    (int)  – higher values appear further right. Optional.
-    #   variant  (str)  – colour key: "primary", "secondary", "danger".
-    #                     Defaults to "primary". Maps to a CSS class via
-    #                     ``SCOTTY_CONFIG["buttons_variants"]``. Optional.
-    #   style    (str)  – "solid" (default) or "outline". Controls whether
-    #                     the button uses the filled or outline variant of
-    #                     the chosen colour. Optional.
+    #   name                (str)         – used to look up a ``{name}_method(self, request)``
+    #                                       hook for extra params (path + query). Optional.
+    #   url                 (str)         – Django URL name. Required. Resolved with
+    #                                       ``reverse()`` on every render.
+    #   label               (str)         – visible text. Required.
+    #   order               (int)         – higher values appear further right. Optional.
+    #   variant             (str)         – colour key: "primary", "secondary", "danger".
+    #                                       Defaults to "primary". Maps to a CSS class via
+    #                                       ``SCOTTY_CONFIG["buttons_variants"]``. Optional.
+    #   style               (str)         – "solid" (default) or "outline". Controls whether
+    #                                       the button uses the filled or outline variant of
+    #                                       the chosen colour. Optional.
+    #   permission_required (str | list)  – permiso(s) requeridos para mostrar el botón.
+    #                                       Si es lista, el usuario debe tener TODOS.
+    #                                       Se evalúa con ``user.has_perm()``. Optional.
     #
     # Items missing url or label are skipped.
     #
@@ -420,6 +423,28 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         filterset.form.helper = self.formhelper_class()
         return filterset
 
+    def _check_user_perms(self, entry):
+        """Verifica si el usuario tiene los permisos requeridos por *entry*.
+
+        ``entry["permission_required"]`` puede ser un string (un permiso)
+        o una lista/tuple (todos requeridos). Si no está definido, devuelve
+        ``True`` (no restringe).
+
+        Returns:
+            bool: ``True`` si el usuario puede ver este botón.
+        """
+        perm_required = entry.get("permission_required")
+        if perm_required is None:
+            return True
+        user = self.request.user
+
+        if user.is_staff:
+            return True
+
+        if isinstance(perm_required, str):
+            return user.has_perm(perm_required)
+        return user.has_perms(perm_required)
+
     def _get_processed_links(self):
         """Procesa links para mostrarse en sección 'extra_links_actions'
 
@@ -428,14 +453,16 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
 
         Para cada item del listado:
         1. Se saltea si no tiene ``url`` o ``label``.
-        2. Si tiene ``name`` y existe ``{name}_method(self, request)``
+        2. Si tiene ``permission_required`` y el usuario no tiene el/los
+           permiso(s), se saltea el item (no se renderiza).
+        3. Si tiene ``name`` y existe ``{name}_method(self, request)``
            en la vista, se invoca para obtener un dict de parámetros.
-        3. Si el dict contiene ``pk`` o ``id`` se pasa como ``kwargs`` a
+        4. Si el dict contiene ``pk`` o ``id`` se pasa como ``kwargs`` a
            ``reverse(url, kwargs={"pk": valor})``; si no, se llama sin kwargs.
-        4. El resto de las claves del dict se agregan como query params.
-        5. Se resuelve ``variant`` + ``style`` a una clase CSS de Bootstrap
+        5. El resto de las claves del dict se agregan como query params.
+        6. Se resuelve ``variant`` + ``style`` a una clase CSS de Bootstrap
            usando :func:`get_button_class` y se agrega como ``btn_class``.
-        6. Se ordena inversamente por ``order`` (mayor valor → más a la derecha).
+        7. Se ordena inversamente por ``order`` (mayor valor → más a la derecha).
 
         Returns:
             list[dict]: links enriquecidos con ``btn_class``, listos para
@@ -448,6 +475,10 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
                 continue
 
             entry = dict(link)
+
+            if not self._check_user_perms(entry):
+                continue
+
             reverse_kwargs = {}
 
             # 1. Obtener parámetros del método (si existe)
