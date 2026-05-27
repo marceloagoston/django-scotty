@@ -7,7 +7,7 @@ import re
 import uuid
 
 from typing import List
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 
 from crispy_forms.helper import FormHelper
 from django_scotty.form_helpers import get_form_buttons
@@ -222,6 +222,8 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
     post_paginate_hook = None
     pre_render_hook = None
     title = "Listado"
+    subtitle = None
+    table_empty_text = None
     # Control para mostrar/ocultar "Acción sobre seleccionados"
     show_bulk_actions = True
     # Sistema unificado de botones de filtros
@@ -229,6 +231,12 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         "filtrar",
         "exportar_xls",
     ]
+
+    # TASK: agegar permisos
+    # Extra header buttons — list of {'name': str, 'url': str, 'label': str, 'order': int} dicts.
+    # Items missing url or label are skipped.
+    # Define <name>_method(self, request) -> dict to append extra query params to the url.
+    extra_links_actions = []
 
     def get_table_kwargs(self):
         kwargs = super().get_table_kwargs()
@@ -269,6 +277,49 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         filterset.form.helper = self.formhelper_class()
         return filterset
 
+    def _get_processed_links(self):
+        """Procesa links para mostrarse en sección 'extra_links_actions'
+
+        El proceso constade los siguientes pasos:
+        1. itera sobre los items que tengan url y label definidos
+        2. Evalua si el item no tiene redefinido el comportamiento {name}_method
+            2.1 Esto se usa para agregarle queryparams o pk
+            2.2 Si tiene se recrea la url agregando la pk y los queryparams
+        3. Se agrega el link a "processed_links"
+        4. Se lo ordena inversamente para mostrar el primero mas a la derecha
+        usando el atributo "order"
+        
+        
+        Si se define método personalizado para una url se re ajusta la
+        url del item
+
+        Args:
+            - None
+        Returns:
+            - processed_links (dict): listado de links a renderizar
+        """
+        processed_links = []
+        
+        for link in self.extra_links_actions:
+            if not link.get("url") or not link.get("label"):
+                continue
+            entry = dict(link)
+            name = link.get("name", "")
+            method = getattr(self, f"{name}_method", None) if name else None
+            if callable(method):
+                try:
+                    extra_params = method(self.request)
+                    if extra_params:
+                        separator = "&" if "?" in entry["url"] else "?"
+                        entry["url"] = f"{entry['url']}{separator}{urlencode(extra_params)}"
+                except Exception:
+                    pass
+            processed_links.append(entry)
+
+        processed_links.sort(key=lambda x: x.get("order", 0), reverse=True)
+
+        return processed_links
+
     def get_context_data(self, **kwargs):
         """Agregamos el total de registros sin filtrar al contexto."""
         # Primero, obtenemos el contexto base de la clase padre
@@ -288,9 +339,14 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         orig_table.url_action_method = f"list-view-{trimed_view_name}"
         orig_table.unique_id = get_unique_id("django-table-")
         orig_table.title = self.title
+        orig_table.subtitle = self.subtitle
         orig_table.view_only = view_only
         orig_table.show_boton_nuevo = self.show_boton_nuevo
         orig_table.usar_modal = self.usar_modal
+
+        # TASK: mandar a cte el default value
+        orig_table.empty_text = self.table_empty_text if self.table_empty_text is not None else '- No hay datos para mostrar -'
+        context["extra_links_actions"] = self._get_processed_links()
 
         if self.createview_class is not None:
             orig_table.create_url = (
