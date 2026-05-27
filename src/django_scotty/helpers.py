@@ -10,6 +10,7 @@ from typing import List
 from urllib.parse import parse_qs, urlencode
 
 from crispy_forms.helper import FormHelper
+from django.conf import settings
 from django_scotty.form_helpers import get_form_buttons
 from django.core.paginator import EmptyPage, Paginator
 from django.db.models import QuerySet
@@ -22,6 +23,67 @@ from django_filters.views import FilterView
 from django_tables2.export.views import ExportMixin
 from django_tables2.views import SingleTableMixin, SingleTableView
 import django_tables2 as tables
+
+
+DEFAULT_EMPTY_MSG = "- No hay datos para mostrar -"
+def get_scotty_setting(key, default=None):
+    """Read a value from ``settings.SCOTTY_CONFIG`` with fallback.
+
+    Central access point for all scotty configuration so views don't
+    reach into ``django.conf.settings`` directly.
+    """
+    config = getattr(settings, "SCOTTY_CONFIG", {})
+    return config.get(key, default)
+
+
+# ── Button variant classes ──────────────────────────────────────────────
+# Each variant can define ``outline`` and ``solid`` styles.
+# Projects can override via ``SCOTTY_CONFIG``::
+#
+#     SCOTTY_CONFIG = {
+#         "buttons_variants": {
+#             "primary":   {"outline": "btn-outline-primary",   "solid": "btn-primary"},
+#             "secondary": {"outline": "btn-outline-secondary", "solid": "btn-secondary"},
+#             "danger":    {"outline": "btn-outline-danger",    "solid": "btn-danger"},
+#         },
+#         ...
+#     }
+#
+# For backward compatibility, a plain string is also accepted:
+#     "primary": "btn-outline-primary"
+
+_BUTTON_VARIANT_DEFAULTS = {
+    "primary":   {"outline": "btn-outline-primary",   "solid": "btn-primary"},
+    "secondary": {"outline": "btn-outline-secondary", "solid": "btn-secondary"},
+    "danger":    {"outline": "btn-outline-danger",    "solid": "btn-danger"},
+}
+
+
+def get_button_class(variant="primary", style="outline"):
+    """Resolve a button variant + style to a CSS class.
+
+    Looks up ``variant`` in ``SCOTTY_CONFIG["buttons_variants"]``.
+    Falls back to ``_BUTTON_VARIANT_DEFAULTS``, then to ``"btn-outline-primary"``.
+
+    Parameters
+    ----------
+    variant : str
+        One of ``"primary"``, ``"secondary"``, ``"danger"`` (default ``"primary"``).
+    style : str
+        ``"outline"`` (default) or ``"solid"``. Ignored when the variant
+        value is a plain string (backward-compat).
+
+    Returns
+    -------
+    str
+        Full Bootstrap button class, e.g. ``"btn-outline-primary"`` or ``"btn-primary"``.
+    """
+    variants = get_scotty_setting("buttons_variants", _BUTTON_VARIANT_DEFAULTS)
+    entry = variants.get(variant, _BUTTON_VARIANT_DEFAULTS.get(variant, "btn-outline-primary"))
+
+    if isinstance(entry, str):
+        return entry
+    return entry.get(style, "btn-outline-primary")
 
 
 class ActionTable(tables.Table):
@@ -232,10 +294,22 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         "exportar_xls",
     ]
 
-    # TASK: agegar permisos
-    # Extra header buttons — list of {'name': str, 'url': str, 'label': str, 'order': int} dicts.
+    # Extra header buttons rendered on the right side of the page title.
+    #
+    # Each entry is a dict with:
+    #   name     (str)  – used to look up a ``{name}_method(self, request)``
+    #                     hook for extra query params. Optional.
+    #   url      (str)  – link target. Required.
+    #   label    (str)  – visible text. Required.
+    #   order    (int)  – higher values appear further right. Optional.
+    #   variant  (str)  – colour key: "primary", "secondary", "danger".
+    #                     Defaults to "primary". Maps to a CSS class via
+    #                     ``SCOTTY_CONFIG["buttons_variants"]``. Optional.
+    #   style    (str)  – "outline" (default) or "solid". Controls whether
+    #                     the button uses the outline or filled variant of
+    #                     the chosen colour. Optional.
+    #
     # Items missing url or label are skipped.
-    # Define <name>_method(self, request) -> dict to append extra query params to the url.
     extra_links_actions = []
 
     def get_table_kwargs(self):
@@ -280,26 +354,20 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
     def _get_processed_links(self):
         """Procesa links para mostrarse en sección 'extra_links_actions'
 
-        El proceso constade los siguientes pasos:
-        1. itera sobre los items que tengan url y label definidos
-        2. Evalua si el item no tiene redefinido el comportamiento {name}_method
-            2.1 Esto se usa para agregarle queryparams o pk
-            2.2 Si tiene se recrea la url agregando la pk y los queryparams
-        3. Se agrega el link a "processed_links"
-        4. Se lo ordena inversamente para mostrar el primero mas a la derecha
-        usando el atributo "order"
-        
-        
-        Si se define método personalizado para una url se re ajusta la
-        url del item
+        Para cada item del listado:
+        1. Se saltea si no tiene ``url`` o ``label``.
+        2. Si tiene ``name`` y existe ``{name}_method(self, request)``
+           en la vista, se invoca para obtener query params extra.
+        3. Se resuelve ``variant`` + ``style`` a una clase CSS de Bootstrap
+           usando :func:`get_button_class` y se agrega como ``btn_class``.
+        4. Se ordena inversamente por ``order`` (mayor valor → más a la derecha).
 
-        Args:
-            - None
         Returns:
-            - processed_links (dict): listado de links a renderizar
+            list[dict]: links enriquecidos con ``btn_class``, listos para
+            renderizar.
         """
         processed_links = []
-        
+
         for link in self.extra_links_actions:
             if not link.get("url") or not link.get("label"):
                 continue
@@ -314,6 +382,10 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
                         entry["url"] = f"{entry['url']}{separator}{urlencode(extra_params)}"
                 except Exception:
                     pass
+
+            variant = entry.get("variant", "primary")
+            style = entry.get("style", "outline")
+            entry["btn_class"] = get_button_class(variant, style)
             processed_links.append(entry)
 
         processed_links.sort(key=lambda x: x.get("order", 0), reverse=True)
@@ -344,8 +416,11 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         orig_table.show_boton_nuevo = self.show_boton_nuevo
         orig_table.usar_modal = self.usar_modal
 
-        # TASK: mandar a cte el default value
-        orig_table.empty_text = self.table_empty_text if self.table_empty_text is not None else '- No hay datos para mostrar -'
+        orig_table.empty_text = (
+            self.table_empty_text
+            if self.table_empty_text is not None
+            else get_scotty_setting("table_empty_text", DEFAULT_EMPTY_MSG)
+        )
         context["extra_links_actions"] = self._get_processed_links()
 
         if self.createview_class is not None:

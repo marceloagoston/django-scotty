@@ -16,7 +16,7 @@
         {% if extra_links_actions %}
             <div class="d-flex align-items-center gap-2">
                 {% for link in extra_links_actions %}
-                    <a href="{{ link.url }}" class="btn btn-outline-primary">
+                    <a href="{{ link.url }}" class="btn {{ link.btn_class }}">
                         {{ link.label }}
                     </a>
                 {% endfor %}
