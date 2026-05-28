@@ -7,6 +7,6 @@ register = template.Library()
 @register.filter
 def to_slug(value):
     """
-    Convierte un string en un slug.
+    Convert a string into a slug.
     """
     return slugify(value)

@@ -11,6 +11,39 @@ from urllib.parse import parse_qs, urlencode
 
 from crispy_forms.helper import FormHelper
 from django.conf import settings
+from django_scotty.constants import (
+    BUTTONS_VARIANTS,
+    BTN_DANGER,
+    BTN_DARK,
+    BTN_INFO,
+    BTN_LIGHT,
+    BTN_OUTLINE_DANGER,
+    BTN_OUTLINE_DARK,
+    BTN_OUTLINE_INFO,
+    BTN_OUTLINE_LIGHT,
+    BTN_OUTLINE_PRIMARY,
+    BTN_OUTLINE_SECONDARY,
+    BTN_OUTLINE_SUCCESS,
+    BTN_OUTLINE_WARNING,
+    BTN_PRIMARY,
+    BTN_SECONDARY,
+    BTN_SUCCESS,
+    BTN_WARNING,
+    ENTRY_BTN_CLASS,
+    ENTRY_STYLE,
+    ENTRY_VARIANT,
+    STYLE_OUTLINE,
+    STYLE_SOLID,
+    TABLE_EMPTY_TEXT,
+    VARIANT_DANGER,
+    VARIANT_DARK,
+    VARIANT_INFO,
+    VARIANT_LIGHT,
+    VARIANT_PRIMARY,
+    VARIANT_SECONDARY,
+    VARIANT_SUCCESS,
+    VARIANT_WARNING,
+)
 from django_scotty.form_helpers import get_form_buttons
 from django.core.paginator import EmptyPage, Paginator
 from django.db.models import QuerySet
@@ -24,6 +57,7 @@ from django_tables2.export.views import ExportMixin
 from django_tables2.views import SingleTableMixin, SingleTableView
 import django_tables2 as tables
 
+logger = logging.getLogger(__name__)
 
 DEFAULT_EMPTY_MSG = "- No hay datos para mostrar -"
 def get_scotty_setting(key, default=None):
@@ -36,9 +70,9 @@ def get_scotty_setting(key, default=None):
     return config.get(key, default)
 
 
-# Button variant classes
-# Esto es util si se usa una libreria distinta a Bootstrap para cambiar las clases que manejan
-# los estilos de los botones
+# Button variant classes.
+# Useful when using a non-Bootstrap library — override the CSS classes
+# that control button styles.
 # Each variant can define ``outline`` and ``solid`` styles.
 # Projects can override via ``SCOTTY_CONFIG``::
 # 
@@ -55,13 +89,18 @@ def get_scotty_setting(key, default=None):
 #     "primary": "btn-primary"
 
 BUTTON_VARIANT_DEFAULTS = {
-    "primary":   {"outline": "btn-outline-primary",   "solid": "btn-primary"},
-    "secondary": {"outline": "btn-outline-secondary", "solid": "btn-secondary"},
-    "danger":    {"outline": "btn-outline-danger",    "solid": "btn-danger"},
+    VARIANT_PRIMARY:   {STYLE_OUTLINE: BTN_OUTLINE_PRIMARY,   STYLE_SOLID: BTN_PRIMARY},
+    VARIANT_SECONDARY: {STYLE_OUTLINE: BTN_OUTLINE_SECONDARY, STYLE_SOLID: BTN_SECONDARY},
+    VARIANT_SUCCESS:   {STYLE_OUTLINE: BTN_OUTLINE_SUCCESS,   STYLE_SOLID: BTN_SUCCESS},
+    VARIANT_DANGER:    {STYLE_OUTLINE: BTN_OUTLINE_DANGER,    STYLE_SOLID: BTN_DANGER},
+    VARIANT_WARNING:   {STYLE_OUTLINE: BTN_OUTLINE_WARNING,   STYLE_SOLID: BTN_WARNING},
+    VARIANT_INFO:      {STYLE_OUTLINE: BTN_OUTLINE_INFO,      STYLE_SOLID: BTN_INFO},
+    VARIANT_LIGHT:     {STYLE_OUTLINE: BTN_OUTLINE_LIGHT,     STYLE_SOLID: BTN_LIGHT},
+    VARIANT_DARK:      {STYLE_OUTLINE: BTN_OUTLINE_DARK,      STYLE_SOLID: BTN_DARK},
 }
 
 
-def get_button_class(variant="primary", style="solid"):
+def get_button_class(variant=VARIANT_PRIMARY, style=STYLE_SOLID):
     """Resolve a button variant + style to a CSS class.
 
     Looks up ``variant`` in ``SCOTTY_CONFIG["buttons_variants"]``.
@@ -80,12 +119,12 @@ def get_button_class(variant="primary", style="solid"):
     str
         Full Bootstrap button class, e.g. ``"btn-primary"`` or ``"btn-outline-primary"``.
     """
-    variants = get_scotty_setting("buttons_variants", BUTTON_VARIANT_DEFAULTS)
-    entry = variants.get(variant, BUTTON_VARIANT_DEFAULTS.get(variant, "btn-primary"))
+    variants = get_scotty_setting(BUTTONS_VARIANTS, BUTTON_VARIANT_DEFAULTS)
+    entry = variants.get(variant, BUTTON_VARIANT_DEFAULTS.get(variant, BTN_PRIMARY))
 
     if isinstance(entry, str):
         return entry  # backward-compat: flat string
-    return entry.get(style, "btn-primary")
+    return entry.get(style, BTN_PRIMARY)
 
 
 class ActionTable(tables.Table):
@@ -97,14 +136,14 @@ class ActionTable(tables.Table):
     acciones = tables.Column(verbose_name="Acciones", orderable=False, empty_values=())
 
     def get_ver_link(self, url):
-        """Mostrar un link a una url con un boton de ver."""
+        """Render a link to a URL as a "view" button."""
         return SafeText(f'<a href="{url}" class="btn boton-ver"></a>')
 
     # TODO: Test
     def render_acciones(self, record):
-        """Renderizar todas las acciones disponibles.
-        Si es una sola en forma de botón, si es más de una
-        como botones agrupados."""
+        """Render all available actions.
+        Single action renders as a button; multiple actions render
+        as a grouped dropdown."""
 
         rendered_edit = SafeText("")
         if getattr(self, "updateview_class", None) is not None:
@@ -113,7 +152,7 @@ class ActionTable(tables.Table):
                 if getattr(self, "usar_modal", False):
                     modal_id = f"modal-{self.unique_id}"
                     rendered_edit = SafeText(
-                        f'<button class="btn btn-warning btn-sm"'
+                        f'<button class="btn {BTN_WARNING} btn-sm"'
                         f' hx-get="{edit_url}?_mid={self.unique_id}"'
                         f' hx-target="#{modal_id}-body"'
                         f' hx-swap="innerHTML"'
@@ -122,14 +161,14 @@ class ActionTable(tables.Table):
                     )
                 else:
                     rendered_edit = SafeText(
-                        f'<button class="btn btn-warning btn-sm"'
+                        f'<button class="btn {BTN_WARNING} btn-sm"'
                         f' hx-get="{edit_url}"'
                         f' hx-target="#main-content"'
                         f' hx-swap="innerHTML"'
                         f' hx-push-url="true">Editar</button>'
                     )
             except Exception as err:
-                logging.error(f"[SCOTTY LOADER] Error mostrando el botón editar {err}")
+                logging.error(f"[SCOTTY LOADER] Error rendering edit button {err}")
 
         rendered_delete = SafeText("")
         if getattr(self, "deleteview_class", None) is not None:
@@ -138,7 +177,7 @@ class ActionTable(tables.Table):
                 delete_mid = f"delete-{self.unique_id}"
                 modal_id = f"modal-{delete_mid}"
                 rendered_delete = SafeText(
-                    f'<button class="btn btn-danger btn-sm ms-1"'
+                    f'<button class="btn {BTN_DANGER} btn-sm ms-1"'
                     f' hx-get="{delete_url}?_mid={delete_mid}"'
                     f' hx-target="#{modal_id}-body"'
                     f' hx-swap="innerHTML"'
@@ -174,7 +213,7 @@ class ActionTable(tables.Table):
             button_html = f"""<button hx-post=\"{url}?pk={record.pk}&action={accion[0]}\"
                     hx-trigger=\"click\"
                     hx-swap=\"outerHTML\"
-                    class=\"btn btn-primary\"
+                    class=\"btn {BTN_PRIMARY}\"
                     hx-indicator=\"#spinner-load\"
                     type=\"btn\"
                     {confirm_attr}>{accion[1]}</button>"""
@@ -213,7 +252,7 @@ class ActionTable(tables.Table):
                 + SafeText(f"""
                             <div class="btn-group">
                             <button type="button"
-                            class="btn btn-primary dropdown-toggle"
+                            class="btn {BTN_PRIMARY} dropdown-toggle"
                             data-bs-toggle="dropdown" aria-expanded="false">
                                 Acciones
                             </button>
@@ -226,17 +265,17 @@ class ActionTable(tables.Table):
             return rendered_edit + rendered_delete
 
     def paginate(self, *args, **kwargs):
-        # Llamamos al método original primero
+        # Call the original method first
         super().paginate(*args, **kwargs)
 
-        # Ahora que la paginación ocurrió, 'self.page' existe
+        # Now that pagination has run, 'self.page' exists
         if self.page and self.post_paginate_hook:
             self.post_paginate_hook(self.page.object_list)
 
 
 # TODO: Test
 class PaginationFixMixin:
-    """Mixin para manejar errores de paginación cuando se aplican filtros"""
+    """Mixin to handle pagination errors when filters are applied."""
 
     def get(self, request, *args, **kwargs):
         """Override get method to handle pagination issues"""
@@ -288,9 +327,9 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
     title = "Listado"
     subtitle = None
     table_empty_text = None
-    # Control para mostrar/ocultar "Acción sobre seleccionados"
+    # Control whether to show the "Action on selected" UI
     show_bulk_actions = True
-    # Sistema unificado de botones de filtros
+    # Unified filter-button system
     available_filter_buttons = [
         "filtrar",
         "exportar_xls",
@@ -298,90 +337,137 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
 
     # Extra header buttons rendered on the right side of the page title.
     #
-    # ``url`` debe ser un **nombre de URL de Django** (ej: ``"contrato-detail"``).
-    # Siempre se resuelve con ``reverse()``. NO pongas paths fijos.
+    # ``extra_links_actions`` is a **list of method names**. Each name maps to a
+    # method on the view. The method provides metadata via **function attributes**
+    # (just like Django admin actions).
     #
-    # Each entry is a dict with:
-    #   name                (str)         – used to look up a ``{name}_method(self, request)``
-    #                                       hook for extra params (path + query). Optional.
-    #   url                 (str)         – Django URL name. Required. Resolved with
-    #                                       ``reverse()`` on every render.
-    #   label               (str)         – visible text. Required.
-    #   order               (int)         – higher values appear further right. Optional.
-    #   variant             (str)         – colour key: "primary", "secondary", "danger".
-    #                                       Defaults to "primary". Maps to a CSS class via
-    #                                       ``SCOTTY_CONFIG["buttons_variants"]``. Optional.
-    #   style               (str)         – "solid" (default) or "outline". Controls whether
-    #                                       the button uses the filled or outline variant of
-    #                                       the chosen colour. Optional.
-    #   permission_required (str | list)  – permiso(s) requeridos para mostrar el botón.
-    #                                       Si es lista, el usuario debe tener TODOS.
-    #                                       Se evalúa con ``user.has_perm()``. Optional.
+    # --- Required attributes ---
+    #   verbose_name        (str) – visible label for the button.
+    #   url                 (str) – Django URL name. Always resolved via
+    #                               ``reverse()`` — do NOT use hardcoded paths.
     #
-    # Items missing url or label are skipped.
+    # --- Optional attributes ---
+    #   variant             (str) – "primary" (default), "secondary", "danger",
+    #                               "success", "warning", "info", "light", "dark".
+    #   style               (str) – "solid" (default) or "outline".
+    #   order               (int) – higher values render further right.
+    #   allowed_permission  (str) – permission required to show the button.
+    #                               Checked via ``user.has_perm()``.
+    #                               Override ``_check_user_perms()`` for custom
+    #                               logic.
+    #   pk                  (str) – keyword argument name from the URL to pass as
+    #                               path parameter. ``True`` is a shorthand for
+    #                               ``"pk"``. E.g. pk="contrato_id" extracts
+    #                               ``self.kwargs.get("contrato_id")``.
+    #   params              (dict) – static query parameters merged into the URL.
     #
-    # {name}_method(self, request)
-    # If the entry has a ``name`` and the view defines
-    # ``{name}_method(self, request)``, it is called before rendering.
-    # The method returns a ``dict``. ``self`` is the view instance (so you
-    # can access anything on the view) and ``request`` is ``self.request``.
+    # --- Method return ---
+    # The method itself may return a ``dict`` with URL parameters. If it returns
+    # a non-empty dict, it overrides ``pk`` and ``params`` attributes (with a
+    # warning logged if both exist). This allows dynamic params that can't be
+    # expressed statically.
     #
-    #   • Si el dict contiene ``pk`` o ``id`` → se pasa a ``reverse()``
-    #     como ``kwargs``, insertando el valor en el path de la URL.
+    # Methods that are not defined, or lack ``verbose_name`` or ``url``,
+    # are silently skipped.
     #
-    #   • El resto de las claves → se agregan como query params.
+    # --- EXAMPLES ---
     #
-    # EJEMPLO 1 pasar queryparams
+    # EXAMPLE 1 — public link with no permission (metadata only)
     #
-    #     # urls.py → path("exportar/", …, name="exportar-list")
+    #     urls.py → path("help/", …, name="help")
     #
-    #     class PedidoListView(CottonTableView):
-    #         extra_links_actions = [
-    #           {
-    #               "name": "exportar",
-    #               "url": "exportar-list",
-    #               "label": "Exportar"
-    #           },
-    #         ]
-    #
-    #         def exportar_method(self, request):
-    #             return {"formato": "xlsx", "desde": request.GET.get("fecha", "")}
-    #
-    #     # → <a href="/exportar/?formato=xlsx&desde=2024-01-01">
-    #
-    # EJEMPLO 2 con pk/id sola (ideal para DetailViews)
-    #
-    #     # urls.py → path("contrato/<int:pk>/", …, name="contrato-detail")
-    #
-    #     class PedidoListView(CottonTableView):
-    #         extra_links_actions = [
-    #             {
-    #               "name": "contrato",
-    #               "url": "contrato-detail",
-    #               "label": "Ver contrato"
-    #             },
-    #         ]
-    #
-    #         def contrato_method(self, request):
-    #             pk = self.kwargs.get("pk")
-    #             if pk:
-    #                 return {"pk": pk}
+    #     class OrderListView(CottonTableView):
+    #         extra_links_actions = ["help"]
+    #         def help(self, request):
     #             return {}
     #
-    #     # → <a href="/contrato/5/">  (desde /proveedor/5/pedidos/)
+    #         help.verbose_name = "Help"
+    #         help.url = "help"
     #
-    #  EJEMPLO 3 pk + queryparams
+    #     # → <a href="/help/" class="btn btn-primary">Help</a>
     #
-    #         def contrato_method(self, request):
-    #             pk = self.kwargs.get("pk")
-    #             if pk:
-    #                 return {"pk": pk, "anio": request.GET.get("anio")}
+    # EXAMPLE 2 — link with permission
+    #
+    #     class OrderListView(CottonTableView):
+    #         extra_links_actions = ["config"]
+    #
+    #         def config(self, request):
     #             return {}
     #
-    #     # → <a href="/contrato/5/?anio=2026">
+    #         config.verbose_name = "Settings"
+    #         config.url = "config"
+    #         config.allowed_permission = "orders.config"
     #
-    # Nota: si ``reverse()`` falla (NoReverseMatch) se conserva el valor
-    # original de ``url``. Si el método entero falla se silencia.
+    #     # → only users with "orders.config" permission see the button.
+    #     #   ``_check_user_perms()`` also lets ``is_staff`` through.
+    #
+    # EXAMPLE 3 — pk shortcut (extract pk from the current URL)
+    #
+    #     urls.py → path("contract/<int:pk>/", …, name="contract-detail")
+    #
+    #     class OrderListView(CottonTableView):
+    #         extra_links_actions = ["contract"]
+    #
+    #         def contract(self, request):
+    #             return {}
+    #
+    #         contract.verbose_name = "View contract"
+    #         contract.url = "contract-detail"
+    #         contract.pk = True        # self.kwargs.get("pk")
+    #         contract.variant = "secondary"
+    #
+    #     # → <a href="/contract/5/" class="btn btn-secondary">View contract</a>
+    #
+    # EXAMPLE 4 — pk with custom name
+    #
+    #     urls.py → path("document/<slug:code>/", …, name="doc-detail")
+    #
+    #         extra_links_actions = ["document"]
+    #
+    #         def document(self, request):
+    #             return {}
+    #
+    #         document.verbose_name = "View document"
+    #         document.url = "doc-detail"
+    #         document.pk = "code"      # self.kwargs.get("code")
+    #
+    #     # → <a href="/document/ABC-123/" class="btn btn-primary">View document</a>
+    #
+    # EXAMPLE 5 — static params + order
+    #
+    #     urls.py → path("export/", …, name="export-list")
+    #
+    #         extra_links_actions = ["export"]
+    #
+    #         export.verbose_name = "Export"
+    #         export.url = "export-list"
+    #         export.params = {"format": "xlsx"}
+    #         export.order = 10
+    #
+    #     # → <a href="/export/?format=xlsx" class="btn btn-primary">Export</a>
+    #
+    # EXAMPLE 6 — dynamic logic via method return
+    #
+    #         extra_links_actions = ["recalculate"]
+    #
+    #         def recalculate(self, request):
+    #             mode = "full" if self.object.amount > 10000 else "simple"
+    #             return {"pk": self.kwargs.get("pk"), "mode": mode}
+    #
+    #         recalculate.verbose_name = "Recalculate"
+    #         recalculate.url = "recalculate-url"
+    #         recalculate.allowed_permission = "orders.recalculate"
+    #         recalculate.style = "outline"
+    #
+    #     # → <a href="/recalculate/5/?mode=full"
+    #     #      class="btn btn-outline-primary">Recalculate</a>
+    #
+    # EXAMPLE 7 — multiple buttons on the same view
+    #
+    #         extra_links_actions = ["export", "contract", "config"]
+    #
+    # Note: if ``reverse()`` fails (NoReverseMatch) the original ``url``
+    # value is preserved.
     extra_links_actions = []
 
     def get_table_kwargs(self):
@@ -402,12 +488,11 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         return kwargs
 
     def get_table(self, **kwargs):
-        # Sobreescribe get_table para pasar la instancia de la vista
-        # "
+        # Override get_table to pass the view instance to the table
         table = super().get_table(**kwargs)
-        table.view = self  # Pasa la instancia de la vista a la tabla
+        table.view = self  # Pass the view instance to the table
 
-        # Si hay definido hook de pre_render
+        # If a pre_render hook is defined, call it
         if self.pre_render_hook:
             self.pre_render_hook(table)
         return table
@@ -423,17 +508,18 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         filterset.form.helper = self.formhelper_class()
         return filterset
 
-    def _check_user_perms(self, entry):
-        """Verifica si el usuario tiene los permisos requeridos por *entry*.
+    def _check_user_perms(self, method):
+        """Check whether the user has the permission required by *method*.
 
-        ``entry["permission_required"]`` puede ser un string (un permiso)
-        o una lista/tuple (todos requeridos). Si no está definido, devuelve
-        ``True`` (no restringe).
+        ``method.allowed_permission`` is a single permission string.
+        If not set, returns ``True`` (no restriction).
+
+        Override this in subclasses to customize permission checking logic.
 
         Returns:
-            bool: ``True`` si el usuario puede ver este botón.
+            bool: ``True`` if the user is allowed to see this button.
         """
-        perm_required = entry.get("permission_required")
+        perm_required = getattr(method, "allowed_permission", None)
         if perm_required is None:
             return True
         user = self.request.user
@@ -441,80 +527,123 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         if user.is_staff:
             return True
 
-        if isinstance(perm_required, str):
-            return user.has_perm(perm_required)
-        return user.has_perms(perm_required)
+        return user.has_perm(perm_required)
+
+    def _get_link_method(self, name):
+        """Return the method for *name*, or None if not defined."""
+        return getattr(self, name, None)
+
+    def _resolve_link_params(self, name, method):
+        """Resolve URL parameters for an extra link.
+
+        1. Base: {} (empty dict)
+        2. If method has ``pk`` attribute → merge with self.kwargs
+        3. If method has ``params`` attribute → merge
+        4. If the method returns a non-empty dict → merge (overrides steps 2-3)
+           and log a warning if steps 2-3 had data (conflict).
+        """
+        params = {}
+
+        # Step 2: pk attribute
+        pk_attr = getattr(method, "pk", None)
+        if pk_attr is not None:
+            pk_key = pk_attr if isinstance(pk_attr, str) else "pk"
+            params[pk_key] = self.kwargs.get(pk_key)
+
+        # Step 3: params attribute
+        params_attr = getattr(method, "params", None)
+        if params_attr:
+            params.update(params_attr)
+
+        # Step 4: Call the method (if callable — it should be, but defensively)
+        had_attr_params = bool(pk_attr is not None or params_attr)
+        try:
+            return_dict = method(self.request) or {}
+        except Exception:
+            return_dict = {}
+
+        if return_dict and had_attr_params:
+            logger.warning(
+                "%s: method return overrides pk/params attributes", name,
+            )
+
+        if return_dict:
+            params.update(return_dict)
+
+        return params
 
     def _get_processed_links(self):
-        """Procesa links para mostrarse en sección 'extra_links_actions'
+        """Process ``extra_links_actions`` entries into render-ready links.
 
-        ``entry["url"]`` debe ser un nombre de URL de Django (ej: ``"contrato-detail"``).
-        Siempre se resuelve con :func:`reverse`.
+        Each entry is a method name. The method provides:
 
-        Para cada item del listado:
-        1. Se saltea si no tiene ``url`` o ``label``.
-        2. Si tiene ``permission_required`` y el usuario no tiene el/los
-           permiso(s), se saltea el item (no se renderiza).
-        3. Si tiene ``name`` y existe ``{name}_method(self, request)``
-           en la vista, se invoca para obtener un dict de parámetros.
-        4. Si el dict contiene ``pk`` o ``id`` se pasa como ``kwargs`` a
-           ``reverse(url, kwargs={"pk": valor})``; si no, se llama sin kwargs.
-        5. El resto de las claves del dict se agregan como query params.
-        6. Se resuelve ``variant`` + ``style`` a una clase CSS de Bootstrap
-           usando :func:`get_button_class` y se agrega como ``btn_class``.
-        7. Se ordena inversamente por ``order`` (mayor valor → más a la derecha).
+        Required attributes:
+            - ``verbose_name``: visible label for the button
+            - ``url``: Django URL name, always resolved via :func:`reverse`
 
-        Returns:
-            list[dict]: links enriquecidos con ``btn_class``, listos para
-            renderizar.
+        Optional attributes:
+            - ``variant``, ``style``: Bootstrap button colour / fill
+            - ``order``: higher values render further right
+            - ``allowed_permission``: single permission string
+            - ``pk``: extract a kwarg from URL as path parameter
+              (``True`` → ``"pk"``, or a string for a custom kwarg name)
+            - ``params``: static dict of query parameters
+
+        The method itself may return a dict of URL parameters. If it returns
+        a non-empty dict, it overrides ``pk`` and ``params`` attributes
+        (with a warning logged if both exist).
+
+        Methods that are not defined, or lack ``verbose_name`` or ``url``,
+        are silently skipped.
         """
         processed_links = []
 
-        for link in self.extra_links_actions:
-            if not link.get("url") or not link.get("label"):
+        for name in self.extra_links_actions:
+            method = self._get_link_method(name)
+            if method is None:
                 continue
 
-            entry = dict(link)
-
-            if not self._check_user_perms(entry):
+            # Required attributes
+            verbose_name = getattr(method, "verbose_name", None)
+            url = getattr(method, "url", None)
+            if not verbose_name or not url:
                 continue
 
-            reverse_kwargs = {}
+            # Permission check (overridable via _check_user_perms)
+            if not self._check_user_perms(method):
+                continue
 
-            # 1. Obtener parámetros del método (si existe)
-            name = link.get("name", "")
-            method = getattr(self, f"{name}_method", None) if name else None
-            extra_params = {}
-            if callable(method):
-                try:
-                    extra_params = method(self.request) or {}
-                except Exception:
-                    extra_params = {}
+            # Resolve URL parameters (pk / query params)
+            params = self._resolve_link_params(name, method)
 
-            # 2. Extraer pk/id para pasarlo como path param
-            pk_value = extra_params.pop("pk", extra_params.pop("id", None))
-            if pk_value is not None:
-                reverse_kwargs["pk"] = pk_value
+            # Extract pk/id for reverse() kwargs
+            pk_value = params.pop("pk", params.pop("id", None))
+            reverse_kwargs = {"pk": pk_value} if pk_value is not None else {}
 
-            # 3. Resolver URL (siempre con reverse)
+            # Resolve URL via reverse
             try:
-                entry["url"] = reverse(entry["url"], kwargs=reverse_kwargs or None)
+                resolved_url = reverse(url, kwargs=reverse_kwargs or None)
             except NoReverseMatch:
-                # conserva la url original
-                pass
+                resolved_url = url
 
-            # 4. Query params restantes
-            if extra_params:
-                entry["url"] += "?" + urlencode(extra_params)
+            # Build full URL with query string
+            query_string = urlencode(params) if params else ""
+            full_url = (
+                f"{resolved_url}?{query_string}" if query_string else resolved_url
+            )
 
-            # 5. Clases Bootstrap
-            variant = entry.get("variant", "primary")
-            style = entry.get("style", "solid")
-            entry["btn_class"] = get_button_class(variant, style)
-            processed_links.append(entry)
+            # Bootstrap button class
+            variant = getattr(method, "variant", VARIANT_PRIMARY)
+            style = getattr(method, "style", STYLE_SOLID)
+
+            processed_links.append({
+                "label": verbose_name,
+                "url": full_url,
+                "btn_class": get_button_class(variant, style),
+                "order": getattr(method, "order", 0),
+            })
 
         processed_links.sort(key=lambda x: x.get("order", 0), reverse=True)
-
         return processed_links
 
     def get_context_data(self, **kwargs):
@@ -543,7 +672,7 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         orig_table.empty_text = (
             self.table_empty_text
             if self.table_empty_text is not None
-            else get_scotty_setting("table_empty_text", DEFAULT_EMPTY_MSG)
+            else get_scotty_setting(TABLE_EMPTY_TEXT, DEFAULT_EMPTY_MSG)
         )
         context["extra_links_actions"] = self._get_processed_links()
 
@@ -571,17 +700,17 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         )
         context["table"] = orig_table
 
-        # Agregar control para mostrar/ocultar acciones masivas
+        # Add control to show/hide bulk actions
         context["show_bulk_actions"] = self.show_bulk_actions
 
-        # Sistema unificado de botones de filtros
+        # Unified filter-button system
         if (
             hasattr(self, "available_filter_buttons")
             and self.available_filter_buttons is not None
         ):
             context["show_action_buttons"] = self.available_filter_buttons
         else:
-            # Fallback: construir botones basado en flags individuales
+            # Fallback: build buttons from individual flags
             buttons = []
             if hasattr(self, "show_filter_line") and self.show_filter_line:
                 buttons.extend(["filtrar", "limpiar"])
@@ -589,7 +718,7 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
                 buttons.append("exportar_xls")
             context["show_action_buttons"] = buttons
 
-        # Lógica unificada: cuando se incluye 'filtrar', automáticamente se incluye 'limpiar'
+        # Unified logic: when 'filtrar' is included, auto-include 'limpiar'
         action_buttons = context["show_action_buttons"]
         if "filtrar" in action_buttons and "limpiar" not in action_buttons:
             action_buttons = list(action_buttons) + ["limpiar"]
@@ -598,7 +727,7 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         return context
 
     def get_export_filename(self, export_format):
-        """Generar nombre de archivo basado en el nombre de la clase de la vista."""
+        """Generate a filename based on the view class name."""
         class_name = self.__class__.__name__.replace("View", "")
         filename = re.sub(r"[^\w\s-]", "", class_name.lower())
         filename = re.sub(r"[-\s]+", "_", filename)
@@ -607,7 +736,7 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
     # TODO: Test
     @property
     def available_actions(self):
-        """Devolver el short name de una acción, si existe."""
+        """Yield the short name of each action, if it exists."""
         if self.available_action_names is not None:
             for action in self.available_action_names:
                 if hasattr(self, action):
@@ -623,13 +752,12 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
             return []
 
     # TODO: Test
-    # TODO: Agregar que sea posible aplicar toda la seleccion al queryset filtrado
-    # completo con algún Flag.
+    # TODO: Allow applying the full selection to the entire filtered queryset
+    # via a flag.
     def post(self, request, *args, **kwargs):
-        """Manejar las operaciones POST sobre los elementos seleccionados"""
+        """Handle POST operations on selected items."""
 
-        # La lista de los IDs de los checkboxes marcados
-        # o si es una colunmna, la columna elegida
+        # The list of checked checkbox IDs, or if a single pk is passed
         if (pk := request.GET.get("pk")) is not None:
             action = request.GET.get("action")
             selected_pks = [pk]
@@ -640,23 +768,23 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
         queryset_to_act_on: QuerySet = None
 
         if selected_pks:
-            # Caso 1: Acción sobre los elementos seleccionados
+            # Case 1: Action on selected items
             queryset_to_act_on = self.model.objects.filter(pk__in=selected_pks)
         elif "filter_query_string" in request.POST:
-            # Caso 2: Acción sobre el QuerySet filtrado completo
-            # Recreamos el QuerySet filtrado sin la paginación
+            # Case 2: Action on the entire filtered queryset
+            # Rebuild the filtered queryset without pagination
             filter_params = parse_qs(request.POST["filter_query_string"])
-            # Limpiamos los parámetros de paginación para obtener todo el QuerySet
+            # Remove pagination params to get the full queryset
             filter_params.pop("page", None)
             filter_params.pop("per_page", None)
 
-            # Usamos el mismo filtro que en la vista GET
+            # Use the same filter as in the GET view
             filterset = self.filterset_class(
                 filter_params, queryset=self.get_queryset()
             )
             queryset_to_act_on = filterset.qs
 
-        # Ejecutar la acción si tenemos un QuerySet para procesar
+        # Execute the action if we have a queryset to process
         if queryset_to_act_on is not None:
             results = []
             for obj in queryset_to_act_on:
@@ -670,16 +798,15 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
                         results.append(result)
                     else:
                         # Fixme: Add messages
-                        # messages.warning(request, 'No se pudo realizar la accion')
+                        # messages.warning(request, 'Could not perform the action')
                         pass
                 except Exception:
-                    # NO ejecutar la acción de nuevo si hay error
+                    # DO NOT run the action again on error
                     pass
 
-            # FIXME: Mejorar esta lógica. De momento si una acción pide
-            # hacer un redirect, no se ejecutaran las siguientes llamadas
-            # a la misma si es en bulk. por lo que al no tener un criterio
-            # se ejecutará el primer redirect.
+            # FIXME: Improve this logic. Currently if an action returns
+            # a redirect, subsequent bulk calls won't execute. Since there
+            # is no clear criteria, the first redirect wins.
             if len(results) == 1:
                 if hasattr(results[0], "status_code"):
                     return results[0]
@@ -691,25 +818,25 @@ class CottonTableView(PaginationFixMixin, ExportMixin, SingleTableMixin, FilterV
     # TODO: Test
     @classmethod
     def get_slugname(cls):
-        """Devolver un slugname para la URL de la vista."""
+        """Return a slugname for the view URL."""
         trimed_view_name = cls.__name__.lower().removesuffix("view")
         return trimed_view_name
 
-    # TASK: ver si no conviene ya tener un metodo que retorne el url_name
+    # TASK: consider having a method that returns the url_name directly
 
 
 def generar_id_valido(base_id):
     """
-    Genera un ID válido para HTML y CSS a partir de una cadena base.
+    Generate a valid HTML/CSS ID from a base string.
 
-    Reemplaza los caracteres no válidos como el punto (.) por guiones (-).
-    Asegura que el ID comience con una letra si la cadena base comienza con un número.
+    Replaces invalid characters (e.g. '.') with hyphens.
+    Ensures the ID starts with a letter by prepending ``id-`` if needed.
     """
-    # 1. Reemplazar caracteres problemáticos, como el punto, por guiones.
+    # 1. Replace problematic characters (e.g. dot) with hyphens.
     id_sanitizado = base_id.replace(".", "-")
 
-    # 2. Asegurarse de que el ID comience con una letra.
-    #    Si el primer caracter es un número, le agregamos un prefijo.
+    # 2. Ensure the ID starts with a letter.
+    #    If the first character is a digit, prepend a prefix.
     if id_sanitizado and id_sanitizado[0].isdigit():
         id_valido = f"id-{id_sanitizado}"
     else:
@@ -720,7 +847,7 @@ def generar_id_valido(base_id):
 
 # TODO: Test
 def get_unique_id(prefix=""):
-    """Generar un ID único con un prefijo opcional"""
+    """Generate a unique ID with an optional prefix."""
     component_id = uuid.uuid1().__str__().replace("-", "")[2:8]
     sanitized_id = generar_id_valido(component_id)
     return f"{prefix}{sanitized_id}"
@@ -728,32 +855,32 @@ def get_unique_id(prefix=""):
 
 class GenericDetailView(DetailView):
     """
-    Una DetailView genérica que automáticamente genera una lista de campos y valores
-    del objeto para ser renderizados por una plantilla.
-    Si se desea, se puede personalizar el detalle sobreescibiendo el template
+    A generic DetailView that automatically builds a list of object fields
+    and values for rendering by a template.
+    Override the template for custom layouts.
     """
 
-    # Apuntamos a nuestra plantilla genérica
+    # Point to the generic template
     template_name = "django_tables2/generic_detail.html"
 
-    # Opcional: define campos que nunca quieres mostrar
+    # Optional: fields to never display
     exclude_fields = ["id"]
 
     def get_context_data(self, **kwargs):
         """
-        Sobrescribimos este método para inyectar nuestra lista de campos en el contexto.
+        Override to inject the field list into the context.
         """
         context = super().get_context_data(**kwargs)
         instance = context["object"]
 
         field_list = []
-        # Iteramos sobre todos los campos definidos en el modelo
+        # Iterate over all model fields
         for field in instance._meta.get_fields():
-            # Many to many por ahora no manejamos
+            # Many-to-many not yet handled
             if not field.concrete or field.many_to_many:
                 continue
 
-            # Sacamos los campos excluidos
+            # Skip excluded fields
             if field.name in self.exclude_fields:
                 continue
 
@@ -784,7 +911,7 @@ class GenericDetailView(DetailView):
                     }
                 )
 
-        # Agregamos la lista y un título al contexto
+        # Add the field list and title to the context
         context["field_list"] = field_list
         context["title"] = (
             f"Detalle de {instance._meta.verbose_name.capitalize()} {instance.id}"
@@ -794,32 +921,32 @@ class GenericDetailView(DetailView):
     # TODO: Test
     @classmethod
     def get_slugname(cls):
-        """Devolver un slugname para la URL de la vista."""
+        """Return a slugname for the view URL."""
         trimed_view_name = cls.__name__.lower().removesuffix("detailview")
         return trimed_view_name
 
 
 class HtmxFormMixin:
     """
-    Mixin compartido por GenericCreateView y GenericUpdateView.
+    Mixin shared by GenericCreateView and GenericUpdateView.
 
-    Atributos opcionales:
-        partial_template_name (str)  Template del fragmento cargado vía HTMX.
+    Optional attributes:
+        partial_template_name (str)  Template fragment loaded via HTMX.
                                      Default: "django_tables2/generic_form_item.html".
-        title_form            (str)  Título dentro del formulario. Default: None.
-        auto_forms_buttons    (bool) Genera botones "Submit" (Guardar) y Cerrar/Volver
-                                     automaticamente según se haya pedido que los forms
-                                     se rendericen en modal o no
+        title_form            (str)  Form title. Default: None.
+        auto_forms_buttons    (bool) Automatically generates Submit (Save) and
+                                     Close/Back buttons based on whether the
+                                     form is rendered in a modal or full page.
 
-                                     Hace append de los botones al final del layout del
-                                     Form que se le haya pasado a las GenericViews
+                                     Appends the buttons at the end of the
+                                     Form layout passed to GenericViews.
                                      Default: True
-    Comportamiento automático:
-        - Renderiza partial_template_name en requests HTMX, template_name completo en el resto.
-        - Si el form tiene FormHelper, inyecta los atributos hx-post/hx-target para modal
-          (cuando llega ?_mid=) o form_action para navegación full-page.
-        - model puede omitirse si form_class define Meta.model.
-        - Tras guardar: HX-Refresh en requests HTMX, redirect a list-view-{slugname} en el resto.
+    Automatic behaviour:
+        - Renders partial_template_name on HTMX requests, full template_name otherwise.
+        - If the form has a FormHelper, injects hx-post/hx-target for modal
+          (when ``?_mid=`` is present) or form_action for full-page navigation.
+        - model can be omitted if form_class defines Meta.model.
+        - On save: HX-Refresh on HTMX requests, redirect to list-view-{slugname} otherwise.
     """
 
     template_name = "django_tables2/generic_form.html"
@@ -892,14 +1019,14 @@ class HtmxFormMixin:
 
 class GenericCreateView(HtmxFormMixin, CreateView):
     """
-    Atributos obligatorios:
-        form_class  (ModelForm) Debe definir Meta.model (model se deriva automáticamente).
+    Required attributes:
+        form_class  (ModelForm) Must define Meta.model (model is derived automatically).
 
-    URL generada automáticamente:
+    Auto-generated URL:
         {slugname}/crear/  →  name="create-view-{slugname}"
 
-    Slugname: nombre de clase sin sufijo "CreateView" en minúsculas.
-    Ejemplo: ArticuloCreateView → "articulo"
+    Slugname: class name with "CreateView" suffix removed, lowercased.
+    Example: ArticuloCreateView → "articulo"
     """
 
     @classmethod
@@ -909,14 +1036,14 @@ class GenericCreateView(HtmxFormMixin, CreateView):
 
 class GenericUpdateView(HtmxFormMixin, UpdateView):
     """
-    Atributos obligatorios:
-        form_class  (ModelForm) Debe definir Meta.model (model y queryset se derivan automáticamente).
+    Required attributes:
+        form_class  (ModelForm) Must define Meta.model (model and queryset are derived automatically).
 
-    URL generada automáticamente:
+    Auto-generated URL:
         {slugname}/<pk>/editar/  →  name="update-view-{slugname}"
 
-    Slugname: nombre de clase sin sufijo "UpdateView" en minúsculas.
-    Ejemplo: ArticuloUpdateView → "articulo"
+    Slugname: class name with "UpdateView" suffix removed, lowercased.
+    Example: ArticuloUpdateView → "articulo"
     """
 
     @classmethod
@@ -926,16 +1053,16 @@ class GenericUpdateView(HtmxFormMixin, UpdateView):
 
 class GenericDeleteView(DeleteView):
     """
-    DeleteView genérica que siempre se renderiza dentro de un modal Bootstrap.
-    Muestra confirmación con el __str__ del objeto antes de eliminar.
+    Generic DeleteView that always renders inside a Bootstrap modal.
+    Shows confirmation with the object's ``__str__`` before deleting.
 
-    Se registra automáticamente en las URLs via add_urls() / load_scotty_urls().
+    Auto-registers via add_urls() / load_scotty_urls().
 
-    URL generada automáticamente:
+    Auto-generated URL:
         {slugname}/<pk>/eliminar/  →  name="delete-view-{slugname}"
 
-    El slugname se deriva del nombre de la clase removiendo el sufijo "DeleteView".
-    Ejemplo: ArticuloDeleteView → slugname="articulo"
+    Slugname: class name with "DeleteView" suffix removed, lowercased.
+    Example: ArticuloDeleteView → slugname="articulo"
     """
 
     template_name = "django_tables2/generic_delete_confirm.html"
@@ -958,7 +1085,7 @@ class GenericDeleteView(DeleteView):
 
     @classmethod
     def get_slugname(cls):
-        """Devolver un slugname para la URL de la vista."""
+        """Return a slugname for the view URL."""
         return cls.__name__.lower().removesuffix("deleteview")
 
 
@@ -970,16 +1097,16 @@ class DictTableView(ExportMixin, SingleTableView):
     # TODO: Test
     @classmethod
     def get_slugname(cls):
-        """Devolver un slugname para la URL de la vista."""
+        """Return a slugname for the view URL."""
         trimed_view_name = cls.__name__.lower().removesuffix("view")
         return trimed_view_name
 
     def get_context_data(self, **kwargs):
-        """Agregamos el total de registros sin filtrar al contexto."""
-        # Primero, obtenemos el contexto base de la clase padre
+        """Add the total unfiltered record count to the context."""
+        # First, get the base context from the parent
         context = super().get_context_data(**kwargs)
 
-        # Agregar control para mostrar/ocultar acciones masivas
+        # Add control to show/hide bulk actions
         context["show_export_xls"] = self.show_export_xls
         context["show_filter_line"] = self.show_filter_line
 
@@ -987,7 +1114,7 @@ class DictTableView(ExportMixin, SingleTableView):
 
 
 def add_urls(views_modules: List) -> List:
-    """Crear urlpatterns para módulos de CottonTableView presentes en views_modules."""
+    """Create urlpatterns for CottonTableView modules found in *views_modules*."""
     urlpatterns = []
     for module in views_modules:
         for name, cls in inspect.getmembers(module, inspect.isclass):
@@ -1045,26 +1172,26 @@ def add_urls(views_modules: List) -> List:
 
 def load_scotty_urls(app_name=None):
     """
-    Auto-detecta la app actual basándose en el módulo que lo llama.
-    Busca dentro de <app>/scotty/ todos los módulos .py y les aplica add_urls().
-    Devuelve un unico urlpatterns combinando todo.
+    Auto-detect the current app from the calling module.
+    Searches <app>/scotty/ for all .py modules and applies add_urls() to each.
+    Returns a combined urlpatterns list.
     """
     if app_name is None:
-        # --- 1. Detectar desde dónde fue llamada la función ---
+        # --- 1. Detect where the function was called from ---
         caller_frame = inspect.stack()[1]
         caller_module = inspect.getmodule(caller_frame[0])
-        caller_module_name = caller_module.__name__  # ejemplo: "mi_app.urls"
-        # Derivar el nombre de la app -> "mi_app"
+        caller_module_name = caller_module.__name__  # e.g. "mi_app.urls"
+        # Derive the app name → "mi_app"
         app_name = caller_module_name.split(".")[0]
 
-    # --- 2. Obtener ruta del paquete de la app ---
+    # --- 2. Get the app package path ---
     app_module = importlib.import_module(app_name)
     app_path = os.path.dirname(app_module.__file__)
     scotty_dir = os.path.join(app_path, "scotty")
 
     collected_urls = []
 
-    # --- 3. Buscar y cargar módulos dentro de scotty/ ---
+    # --- 3. Find and load modules inside scotty/ ---
     if os.path.isdir(scotty_dir):
         for module_info in pkgutil.iter_modules([scotty_dir]):
             module_name = module_info.name
@@ -1079,7 +1206,7 @@ def load_scotty_urls(app_name=None):
                 modules_list.append(module)
             except Exception as err:
                 logging.error(
-                    f"[SCOTTY LOADER] Error importando {full_module_path} {err}"
+                    f"[SCOTTY LOADER] Error importing {full_module_path} {err}"
                 )
             collected_urls += add_urls(modules_list)
 
